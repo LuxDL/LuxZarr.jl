@@ -1,8 +1,10 @@
 module LuxExt
 
 using LuxZarr: LuxZarr, extract_model_info, reconstruct_model_from_info, load_model,
-               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree
+               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
+               LazyParameters, LazyState, LazyLuxModel, unwrap
 using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection
+using LuxCore: LuxCore
 using Functors: Functors
 using Adapt: adapt
 using Random: Random, default_rng
@@ -15,12 +17,30 @@ LuxZarr._get_lux_version(::AbstractLuxLayer) = string(pkgversion(Lux))
 function LuxZarr.load_model(
     store_or_path,
     model::AbstractLuxLayer;
+    lazy::Bool=true,
     rng=default_rng(),
     kwargs...,
 )
     ps, st = Lux.setup(rng, model)
-    return LuxZarr.load_model(store_or_path, ps, st; kwargs...)
+    ps_loaded, st_loaded = LuxZarr.load_model(store_or_path, ps, st; lazy=lazy, kwargs...)
+    if lazy
+        return LazyLuxModel(model, ps_loaded, st_loaded)
+    else
+        return (unwrap(ps_loaded), unwrap(st_loaded))
+    end
 end
+
+# Callable LazyLuxModel
+(lm::LazyLuxModel)(x, ps=lm.ps, st=lm.st) = lm.model(x, Base.materialize(ps), unwrap(st))
+
+# Transparent application of AbstractLuxLayer with LazyParameters / LazyState
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
 
 # Model metadata extraction via multiple dispatch
 function LuxZarr.extract_model_info(model::AbstractLuxLayer)
@@ -74,14 +94,6 @@ function LuxZarr.extract_model_info(model::Lux.SkipConnection)
         "summary" => string(model),
         "layers" => extract_model_info(model.layers),
         "connection" => string(model.connection),
-    )
-end
-
-function LuxZarr.extract_model_info(model::Union{Lux.Chain, Lux.Parallel, Lux.BranchLayer})
-    return Dict{String, Any}(
-        "type" => string(nameof(typeof(model))),
-        "summary" => string(model),
-        "layers" => [extract_model_info(l) for l in _get_layer_list(model.layers)],
     )
 end
 
@@ -154,26 +166,16 @@ function _reconstruct_layer(::Val{:Conv}, info::AbstractDict)
     return Conv(k_size, in_chs => out_chs, act; use_bias=use_bias)
 end
 
-function _reconstruct_layer(::Val{:Chain}, info::AbstractDict)
+function _reconstruct_container(f, info::AbstractDict)
     haskey(info, "layers") || return nothing
     sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
     any(isnothing, sub_layers) && return nothing
-    return Chain(sub_layers...)
+    return f(sub_layers)
 end
 
-function _reconstruct_layer(::Val{:Parallel}, info::AbstractDict)
-    haskey(info, "layers") || return nothing
-    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-    any(isnothing, sub_layers) && return nothing
-    return Parallel(+, sub_layers...)
-end
-
-function _reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict)
-    haskey(info, "layers") || return nothing
-    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-    any(isnothing, sub_layers) && return nothing
-    return BranchLayer(sub_layers...)
-end
+_reconstruct_layer(::Val{:Chain}, info::AbstractDict) = _reconstruct_container(layers -> Chain(layers...), info)
+_reconstruct_layer(::Val{:Parallel}, info::AbstractDict) = _reconstruct_container(layers -> Parallel(+, layers...), info)
+_reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict) = _reconstruct_container(layers -> BranchLayer(layers...), info)
 
 function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict)
     chs = Int(get(info, "chs", 1))
@@ -188,9 +190,9 @@ function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict)
     return SkipConnection(sub_l, +)
 end
 
-function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states)
+function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states, lazy::Bool=true)
     _, st_skeleton = Lux.setup(default_rng(), model)
-    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states)
+    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states, lazy)
     return (ps, st)
 end
 

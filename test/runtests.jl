@@ -24,8 +24,10 @@ using Zarr
             save_path = joinpath(tmp_dir, "pure_tree.zarr")
             save_model(save_path, ps, st; metadata=Dict("custom_tag" => "pure_tree"))
 
-            # Standalone loading
+            # Standalone lazy loading (default)
             ps_loaded, st_loaded = load_model(save_path)
+            @test ps_loaded isa LazyParameters
+            @test st_loaded isa LazyState
             @test ps_loaded.layer_1.weight == ps.layer_1.weight
             @test ps_loaded.layer_1.bias == ps.layer_1.bias
             @test ps_loaded.layer_2.weight == ps.layer_2.weight
@@ -34,14 +36,20 @@ using Zarr
             @test st_loaded.active == Val(true)
             @test st_loaded.mode == :eval
 
+            # Eager loading (lazy=false)
+            ps_eager, st_eager = load_model(save_path; lazy=false)
+            @test ps_eager isa NamedTuple
+            @test !(ps_eager isa LazyParameters)
+            @test ps_eager.layer_1.weight == ps.layer_1.weight
+
             # Guided loading with ps, st
-            ps_guided, st_guided = load_model(save_path, ps, st)
+            ps_guided, st_guided = load_model(save_path, ps, st; lazy=false)
             @test ps_guided.layer_1.weight == ps.layer_1.weight
             @test st_guided.step == 100
         end
     end
 
-    @testset "Dense and Chain Models" begin
+    @testset "Dense and Chain Models with Lazy Execution & Display" begin
         model = Chain(
             Dense(4 => 8, relu),
             Dense(8 => 2)
@@ -52,32 +60,74 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "dense_chain.zarr")
-
-            # Save model
             save_model(save_path, ps, st; model=model, metadata=Dict("tag" => "test_dense"))
             @test isdir(save_path)
 
-            # Metadata only inspection
-            meta = load_model(save_path; metadata_only=true)
-            @test meta["format"] == "lux_zarr"
-            @test meta["user_metadata"]["tag"] == "test_dense"
-            @test haskey(meta, "model_info")
-            @test meta["model_info"]["type"] == "Chain"
+            # Standalone load returning LazyLuxModel
+            lazy_model = load_model(save_path)
+            @test lazy_model isa LazyLuxModel
+            @test lazy_model.ps isa LazyParameters
+            @test lazy_model.st isa LazyState
 
-            # Guided load with model
-            ps_loaded, st_loaded = load_model(save_path, model)
-            y_loaded, _ = model(x, ps_loaded, st_loaded)
-            @test y ≈ y_loaded
+            # Callable LazyLuxModel execution
+            y_lazy, _ = lazy_model(x)
+            @test y ≈ y_lazy
 
-            # Guided load with (ps, st)
-            ps_loaded2, st_loaded2 = load_model(save_path, ps, st)
-            y_loaded2, _ = model(x, ps_loaded2, st_loaded2)
-            @test y ≈ y_loaded2
+            # Direct model(x, ps, st) execution with LazyParameters
+            y_direct, _ = model(x, lazy_model.ps, lazy_model.st)
+            @test y ≈ y_direct
 
-            # Standalone load (reconstruction)
-            ps_standalone, st_standalone = load_model(save_path)
-            y_standalone, _ = model(x, ps_standalone, st_standalone)
-            @test y ≈ y_standalone
+            # Device transfer (dev(ps)) and materialize(ps)
+            cpu_dev = cpu_device()
+            ps_cpu = cpu_dev(lazy_model.ps)
+            @test ps_cpu.layer_1.weight isa Matrix{Float32}
+            @test ps_cpu.layer_1.weight == ps.layer_1.weight
+
+            # Base.materialize
+            ps_mat = materialize(lazy_model.ps)
+            @test ps_mat.layer_1.weight isa Matrix{Float32}
+            @test ps_mat.layer_1.weight == ps.layer_1.weight
+
+            # Single leaf materialize
+            w_mat = materialize(lazy_model.ps.layer_1.weight)
+            @test w_mat isa Matrix{Float32}
+            @test w_mat == ps.layer_1.weight
+
+            # Positional device materialize
+            ps_dev = materialize(cpu_dev, lazy_model.ps)
+            @test ps_dev.layer_1.weight isa Matrix{Float32}
+
+            # Base.show display testing (100% Lazy on-disk)
+            show_str_ps = sprint(show, MIME("text/plain"), lazy_model.ps)
+            @test occursin("LazyParameters (all parameters on-disk):", show_str_ps)
+            @test occursin("layer_1", show_str_ps)
+            @test occursin("weight: Float32 (8, 4)", show_str_ps)
+            @test !occursin("[in-memory", show_str_ps) # No redundant tags when 100% lazy
+
+            show_str_model = sprint(show, MIME("text/plain"), lazy_model)
+            @test occursin("LazyLuxModel (Chain):", show_str_model)
+            @test occursin("All on-disk", show_str_model)
+
+            # Compact 1-line show
+            @test sprint(show, lazy_model.ps) == "LazyParameters(2 entries)"
+            @test sprint(show, lazy_model.st) == "LazyState(2 entries)"
+            @test sprint(show, lazy_model) == "LazyLuxModel(Chain)"
+
+            # Mixed state display (modify one layer in-memory)
+            ps_mixed = LazyParameters((
+                layer_1 = (weight = lazy_model.ps.layer_1.weight, bias = lazy_model.ps.layer_1.bias),
+                layer_2 = (weight = Array(lazy_model.ps.layer_2.weight), bias = Array(lazy_model.ps.layer_2.bias)),
+            ))
+            show_str_mixed = sprint(show, MIME("text/plain"), ps_mixed)
+            @test occursin("on-disk /", show_str_mixed)
+            @test occursin("[in-memory Array]", show_str_mixed) # Highlights only exceptions
+
+            # Eager load (lazy=false)
+            ps_eager, st_eager, model_eager = load_model(save_path; lazy=false)
+            @test ps_eager isa NamedTuple
+            @test !(ps_eager isa LazyParameters)
+            y_eager, _ = model_eager(x, ps_eager, st_eager)
+            @test y ≈ y_eager
         end
     end
 
@@ -98,17 +148,22 @@ using Zarr
             save_path = joinpath(tmp_dir, "batchnorm_model.zarr")
             save_model(save_path, ps, st; model=model)
 
-            # Guided load with model
-            ps_loaded, st_loaded = load_model(save_path, model)
-            @test st_loaded.layer_2.running_mean ≈ st.layer_2.running_mean
-            @test st_loaded.layer_2.running_var ≈ st.layer_2.running_var
-            @test st_loaded.layer_2.training == st.layer_2.training
+            # Lazy load with model
+            lazy_model = load_model(save_path, model)
+            @test lazy_model isa LazyLuxModel
+            @test lazy_model.st.layer_2.running_mean ≈ st.layer_2.running_mean
+            @test lazy_model.st.layer_2.running_var ≈ st.layer_2.running_var
+            @test lazy_model.st.layer_2.training == st.layer_2.training
+
+            # State display
+            show_str_st = sprint(show, MIME("text/plain"), lazy_model.st)
+            @test occursin("LazyState:", show_str_st)
+            @test occursin("running_mean", show_str_st)
 
             # Standalone load
-            ps_standalone, st_standalone = load_model(save_path)
-            @test ps_standalone.layer_1.weight ≈ ps.layer_1.weight
-            @test st_standalone.layer_2.running_mean ≈ st.layer_2.running_mean
-            @test st_standalone.layer_2.running_var ≈ st.layer_2.running_var
+            lazy_standalone = load_model(save_path)
+            @test lazy_standalone.ps.layer_1.weight ≈ ps.layer_1.weight
+            @test lazy_standalone.st.layer_2.running_mean ≈ st.layer_2.running_mean
         end
     end
 
@@ -126,15 +181,10 @@ using Zarr
             save_path = joinpath(tmp_dir, "complex_model.zarr")
             save_model(save_path, ps, st; model=model_valid)
 
-            # Guided load
-            ps_loaded, st_loaded = load_model(save_path, model_valid)
-            y_loaded, _ = model_valid(x, ps_loaded, st_loaded)
-            @test y ≈ y_loaded
-
-            # Standalone load
-            ps_standalone, st_standalone = load_model(save_path)
-            y_standalone, _ = model_valid(x, ps_standalone, st_standalone)
-            @test y ≈ y_standalone
+            # Lazy load
+            lazy_model = load_model(save_path, model_valid)
+            y_lazy, _ = lazy_model(x)
+            @test y ≈ y_lazy
         end
     end
 
@@ -164,8 +214,8 @@ using Zarr
         mem_store = isdefined(Zarr, :DictStore) ? Zarr.DictStore() : (isdefined(Zarr, :MemoryStore) ? Zarr.MemoryStore() : Dict{String, Vector{UInt8}}())
         save_model(mem_store, ps, st; model=model)
 
-        ps_loaded, st_loaded = load_model(mem_store, model)
-        y_loaded, _ = model(x, ps_loaded, st_loaded)
+        lazy_model = load_model(mem_store, model)
+        y_loaded, _ = lazy_model(x)
         @test y ≈ y_loaded
     end
 
@@ -176,21 +226,15 @@ using Zarr
         )
         ps, st = Lux.setup(rng, model)
         x = randn(rng, Float32, 6, 6, 1, 2)
-        conv_out, _ = model.layers.layer_1(x, ps.layer_1, st.layer_1)
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "conv_model.zarr")
             save_model(save_path, ps, st; model=model)
 
-            # Guided load
-            ps_loaded, st_loaded = load_model(save_path, model)
-            @test ps_loaded.layer_1.weight == ps.layer_1.weight
-            @test ps_loaded.layer_1.bias == ps.layer_1.bias
-
-            # Standalone load
-            ps_standalone, st_standalone, model_standalone = load_model(save_path)
-            @test ps_standalone.layer_1.weight == ps.layer_1.weight
-            @test model_standalone isa Chain
+            lazy_model = load_model(save_path)
+            @test lazy_model isa LazyLuxModel
+            @test lazy_model.ps.layer_1.weight == ps.layer_1.weight
+            @test lazy_model.ps.layer_1.bias == ps.layer_1.bias
         end
     end
 
@@ -213,8 +257,8 @@ using Zarr
             @test meta["user_metadata"]["epoch"] == 42
             @test isapprox(meta["user_metadata"]["loss"], 0.0012f0; atol=1e-5)
 
-            ps_loaded, _ = load_model(save_path, model)
-            @test ps_loaded.weight == ps.weight
+            lazy_model = load_model(save_path, model)
+            @test lazy_model.ps.weight == ps.weight
         end
     end
 
@@ -229,9 +273,9 @@ using Zarr
                 save_path = joinpath(tmp_dir, "act_model.zarr")
                 save_model(save_path, ps, st; model=model)
 
-                ps_loaded, st_loaded, model_rec = load_model(save_path)
-                @test model_rec isa Chain
-                y_rec, _ = model_rec(x, ps_loaded, st_loaded)
+                lazy_model = load_model(save_path)
+                @test lazy_model isa LazyLuxModel
+                y_rec, _ = lazy_model(x)
                 @test y ≈ y_rec
             end
         end
