@@ -91,3 +91,7 @@ function Base.show(io::IO, ::MIME"text/plain", lm::LazyLuxModel)
     status = "$(_format_count(stats.num_lazy)) on-disk / $(_format_count(stats.num_in_memory)) in-memory"
     _show_tree(io, unwrap(lm.ps); title="LazyLuxModel ($(nameof(typeof(lm.model)))):", status_suffix=status)
 end
+
+Base.show(io::IO, lp::LazyParameters) = print(io, "LazyParameters(", length(keys(lp)), " entries)")
+Base.show(io::IO, ls::LazyState) = print(io, "LazyState(", length(keys(ls)), " entries)")
+Base.show(io::IO, lm::LazyLuxModel) = print(io, "LazyLuxModel(", nameof(typeof(lm.model)), ")")

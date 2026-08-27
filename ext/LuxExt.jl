@@ -97,14 +97,6 @@ function LuxZarr.extract_model_info(model::Lux.SkipConnection)
     )
 end
 
-function LuxZarr.extract_model_info(model::Union{Lux.Chain, Lux.Parallel, Lux.BranchLayer})
-    return Dict{String, Any}(
-        "type" => string(nameof(typeof(model))),
-        "summary" => string(model),
-        "layers" => [extract_model_info(l) for l in _get_layer_list(model.layers)],
-    )
-end
-
 _get_layer_list(layers::NamedTuple) = values(layers)
 _get_layer_list(layers::Union{Tuple, AbstractVector}) = layers
 _get_layer_list(layers) = (layers,)
@@ -174,26 +166,16 @@ function _reconstruct_layer(::Val{:Conv}, info::AbstractDict)
     return Conv(k_size, in_chs => out_chs, act; use_bias=use_bias)
 end
 
-function _reconstruct_layer(::Val{:Chain}, info::AbstractDict)
+function _reconstruct_container(f, info::AbstractDict)
     haskey(info, "layers") || return nothing
     sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
     any(isnothing, sub_layers) && return nothing
-    return Chain(sub_layers...)
+    return f(sub_layers)
 end
 
-function _reconstruct_layer(::Val{:Parallel}, info::AbstractDict)
-    haskey(info, "layers") || return nothing
-    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-    any(isnothing, sub_layers) && return nothing
-    return Parallel(+, sub_layers...)
-end
-
-function _reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict)
-    haskey(info, "layers") || return nothing
-    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-    any(isnothing, sub_layers) && return nothing
-    return BranchLayer(sub_layers...)
-end
+_reconstruct_layer(::Val{:Chain}, info::AbstractDict) = _reconstruct_container(layers -> Chain(layers...), info)
+_reconstruct_layer(::Val{:Parallel}, info::AbstractDict) = _reconstruct_container(layers -> Parallel(+, layers...), info)
+_reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict) = _reconstruct_container(layers -> BranchLayer(layers...), info)
 
 function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict)
     chs = Int(get(info, "chs", 1))

@@ -108,6 +108,11 @@ using Zarr
             @test occursin("LazyLuxModel (Chain):", show_str_model)
             @test occursin("All on-disk", show_str_model)
 
+            # Compact 1-line show
+            @test sprint(show, lazy_model.ps) == "LazyParameters(2 entries)"
+            @test sprint(show, lazy_model.st) == "LazyState(2 entries)"
+            @test sprint(show, lazy_model) == "LazyLuxModel(Chain)"
+
             # Mixed state display (modify one layer in-memory)
             ps_mixed = LazyParameters((
                 layer_1 = (weight = lazy_model.ps.layer_1.weight, bias = lazy_model.ps.layer_1.bias),
