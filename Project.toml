@@ -2,3 +2,26 @@ name = "LuxZarr"
 uuid = "8da8d8e8-4d76-4e80-818b-a3b53cc9b4a2"
 version = "0.1.0"
 authors = ["Lazaro Alonso <lazarus.alon@gmail.com>"]
+
+[deps]
+Adapt = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+Functors = "d9f16b24-f501-4c13-a1f2-28368ffc5196"
+LuxCore = "bb33d45b-7691-41d6-9220-0943567d0623"
+MLDataDevices = "7e8f7934-dd98-4c1a-8fe8-92b47a384d40"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Zarr = "0a941bbe-ad1d-11e8-39d9-ab76183a1d99"
+
+[weakdeps]
+Lux = "b2108857-7c20-44ae-9111-449ecde12c47"
+
+[extensions]
+LuxExt = "Lux"
+
+[compat]
+Adapt = "4.4"
+Functors = "0.5"
+Lux = "1.31.4"
+LuxCore = "1.5.1"
+MLDataDevices = "1.17"
+Zarr = "0.10.2"
+julia = "1.10"
