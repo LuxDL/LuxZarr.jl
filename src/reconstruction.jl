@@ -5,24 +5,24 @@ end
 _OrderedNode() = _OrderedNode(Dict{Any, Any}(), Any[])
 
 function _reconstruct_from_keypaths(entries)
-    if isempty(entries)
-        return NamedTuple()
-    end
+    isempty(entries) && return NamedTuple()
 
     root = _OrderedNode()
     for (kp, val) in entries
         keys_tuple = kp.keys
-        if isempty(keys_tuple)
-            return val
-        end
+        isempty(keys_tuple) && return val
         curr = root
-        for k in keys_tuple[1:(end - 1)]
+        n = length(keys_tuple)
+        @inbounds for i in 1:(n - 1)
+            k = keys_tuple[i]
             if !haskey(curr.children, k)
                 node = _OrderedNode()
                 curr.children[k] = node
                 push!(curr.keys_order, k)
+                curr = node
+            else
+                curr = curr.children[k]
             end
-            curr = curr.children[k]
         end
         leaf_k = keys_tuple[end]
         if !haskey(curr.children, leaf_k)

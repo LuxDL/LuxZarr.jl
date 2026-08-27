@@ -118,9 +118,10 @@ _setup_store(store; force::Bool) = store
 function _collect_arrays_and_scalars(tree)
     array_entries = Tuple{KeyPath, Array}[]
     scalar_dict = Dict{String, Any}()
+    cpu_dev = cpu_device()
     Functors.fmap_with_path(tree; exclude=_isleaf) do kp, x
         if x isa AbstractArray
-            arr = Array(cpu_device()(x))
+            arr = Array(cpu_dev(x))
             push!(array_entries, (kp, arr))
         elseif x !== nothing
             scalar_dict[_keypath_to_path(kp)] = _serialize_scalar(x)
