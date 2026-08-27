@@ -1,5 +1,5 @@
 """
-    load_model(store_or_path, [model / ps, st]; metadata_only=false, kwargs...)
+    load_model(store_or_path, [model / ps, st]; lazy=true, metadata_only=false, kwargs...)
 
 Load model parameters, states, and optionally model architecture from a Zarr store or directory.
 
@@ -7,26 +7,27 @@ Load model parameters, states, and optionally model architecture from a Zarr sto
 
 1. **Guided loading into initialized `(ps, st)`**:
    ```julia
-   ps, st = load_model(store_or_path, ps, st; kwargs...)
+   ps, st = load_model(store_or_path, ps, st; lazy=true, kwargs...)
    ```
-   Populates existing `(ps, st)` matching KeyPaths, adapting to current device and precision.
+   Populates existing `(ps, st)` matching KeyPaths.
 
 2. **Standalone loading**:
    ```julia
-   ps, st = load_model(store_or_path; kwargs...)
-   # or when model is reconstructable:
-   ps, st, model = load_model(store_or_path; kwargs...)
+   # When model architecture is reconstructable:
+   lazy_model = load_model(store_or_path) # Returns LazyLuxModel(model, ps, st)
+   # Or without model architecture:
+   ps, st = load_model(store_or_path)     # Returns (LazyParameters, LazyState)
    ```
-   Directly reconstructs parameters and states from the Zarr hierarchy and metadata attributes.
 
 3. **Guided loading into a model**:
    ```julia
-   ps, st = load_model(store_or_path, model; kwargs...)
+   lazy_model = load_model(store_or_path, model; lazy=true, kwargs...)
    ```
    (Available when `Lux` is loaded).
 
 ## Keyword Arguments
 
+  - `lazy`: If `true` (default), leaves array nodes as lazy `Zarr.ZArray` leaves wrapped in `LazyParameters` and `LazyState` (or `LazyLuxModel`). If `false`, immediately materializes all arrays into memory and returns raw unwrapped `NamedTuple`s.
   - `metadata_only`: If `true`, returns only the metadata dictionary without loading tensor arrays into memory. Defaults to `false`.
 """
 function load_model end
@@ -36,6 +37,7 @@ function load_model(
     store_or_path,
     ps,
     st=NamedTuple();
+    lazy::Bool=true,
     metadata_only::Bool=false,
     kwargs...,
 )
@@ -46,15 +48,20 @@ function load_model(
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     scalar_states = get(attrs, "scalar_states", Dict{String, Any}())
 
-    ps_loaded = _guided_load_tree(root_g, ps, "parameters", scalar_params)
-    st_loaded = _guided_load_tree(root_g, st, "states", scalar_states)
+    ps_loaded = _guided_load_tree(root_g, unwrap(ps), "parameters", scalar_params, lazy)
+    st_loaded = _guided_load_tree(root_g, unwrap(st), "states", scalar_states, lazy)
 
-    return (ps_loaded, st_loaded)
+    if lazy
+        return (LazyParameters(ps_loaded), LazyState(st_loaded))
+    else
+        return (ps_loaded, st_loaded)
+    end
 end
 
 # Mode 2: Standalone load without model or ps/st
 function load_model(
     store_or_path;
+    lazy::Bool=true,
     metadata_only::Bool=false,
     kwargs...,
 )
@@ -67,26 +74,42 @@ function load_model(
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     scalar_states = get(attrs, "scalar_states", Dict{String, Any}())
 
-    ps = _reconstruct_from_keypaths(_load_tree_entries(root_g, "parameters", param_keypaths, scalar_params))
-    st = _reconstruct_from_keypaths(_load_tree_entries(root_g, "states", state_keypaths, scalar_states))
+    ps = _reconstruct_from_keypaths(_load_tree_entries(root_g, "parameters", param_keypaths, scalar_params, lazy))
+    st = _reconstruct_from_keypaths(_load_tree_entries(root_g, "states", state_keypaths, scalar_states, lazy))
     model = reconstruct_model_from_info(get(attrs, "model_info", nothing))
 
     if model !== nothing && isdefined(LuxZarr, :_setup_model_skeleton)
-        ps, st = LuxZarr._setup_model_skeleton(model, root_g, ps, st, scalar_states)
+        ps, st = LuxZarr._setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy)
     end
 
-    return model !== nothing ? (ps, st, model) : (ps, st)
+    if lazy
+        if model !== nothing
+            return LazyLuxModel(model, LazyParameters(ps), LazyState(st))
+        else
+            return (LazyParameters(ps), LazyState(st))
+        end
+    else
+        if model !== nothing
+            return (ps, st, model)
+        else
+            return (ps, st)
+        end
+    end
 end
 
-function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dict::AbstractDict)
+function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dict::AbstractDict, lazy::Bool)
     return Functors.fmap_with_path(tree; exclude=_isleaf) do kp, x
         rel_path = _keypath_to_path(kp)
         if x isa AbstractArray
             full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
             z_node = _get_zarr_node(root_g, full_path)
             if z_node isa Zarr.ZArray
-                arr_data = Array(z_node)
-                return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
+                if lazy
+                    return z_node
+                else
+                    arr_data = Array(z_node)
+                    return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
+                end
             end
         elseif haskey(scalar_dict, rel_path)
             return _deserialize_scalar(scalar_dict[rel_path], typeof(x))
@@ -95,7 +118,7 @@ function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dic
     end
 end
 
-function _load_tree_entries(root_g::Zarr.ZGroup, prefix::String, raw_keypaths, scalar_dict::AbstractDict)
+function _load_tree_entries(root_g::Zarr.ZGroup, prefix::String, raw_keypaths, scalar_dict::AbstractDict, lazy::Bool)
     entries = Pair{KeyPath, Any}[]
     for raw_kp in raw_keypaths
         kp = _deserialize_keypath(raw_kp)
@@ -103,7 +126,7 @@ function _load_tree_entries(root_g::Zarr.ZGroup, prefix::String, raw_keypaths, s
         full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
         z_node = _get_zarr_node(root_g, full_path)
         if z_node isa Zarr.ZArray
-            push!(entries, kp => Array(z_node))
+            push!(entries, kp => lazy ? z_node : Array(z_node))
         end
     end
     for (path_str, val) in scalar_dict

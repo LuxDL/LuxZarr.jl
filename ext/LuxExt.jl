@@ -1,8 +1,10 @@
 module LuxExt
 
 using LuxZarr: LuxZarr, extract_model_info, reconstruct_model_from_info, load_model,
-               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree
+               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
+               LazyParameters, LazyState, LazyLuxModel, unwrap
 using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection
+using LuxCore: LuxCore
 using Functors: Functors
 using Adapt: adapt
 using Random: Random, default_rng
@@ -15,12 +17,32 @@ LuxZarr._get_lux_version(::AbstractLuxLayer) = string(pkgversion(Lux))
 function LuxZarr.load_model(
     store_or_path,
     model::AbstractLuxLayer;
+    lazy::Bool=true,
     rng=default_rng(),
     kwargs...,
 )
     ps, st = Lux.setup(rng, model)
-    return LuxZarr.load_model(store_or_path, ps, st; kwargs...)
+    ps_loaded, st_loaded = LuxZarr.load_model(store_or_path, ps, st; lazy=lazy, kwargs...)
+    if lazy
+        return LazyLuxModel(model, ps_loaded, st_loaded)
+    else
+        return (unwrap(ps_loaded), unwrap(st_loaded))
+    end
 end
+
+# Callable LazyLuxModel
+(lm::LazyLuxModel)(x) = lm.model(x, Base.materialize(lm.ps), unwrap(lm.st))
+(lm::LazyLuxModel)(x, ps) = lm.model(x, Base.materialize(ps), unwrap(lm.st))
+(lm::LazyLuxModel)(x, ps, st) = lm.model(x, Base.materialize(ps), unwrap(st))
+
+# Transparent application of AbstractLuxLayer with LazyParameters / LazyState
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
 
 # Model metadata extraction via multiple dispatch
 function LuxZarr.extract_model_info(model::AbstractLuxLayer)
@@ -188,9 +210,9 @@ function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict)
     return SkipConnection(sub_l, +)
 end
 
-function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states)
+function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states, lazy::Bool=true)
     _, st_skeleton = Lux.setup(default_rng(), model)
-    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states)
+    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states, lazy)
     return (ps, st)
 end
 
