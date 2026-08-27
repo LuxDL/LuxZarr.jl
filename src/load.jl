@@ -32,6 +32,8 @@ Load model parameters, states, and optionally model architecture from a Zarr sto
 """
 function load_model end
 
+_wrap_lazy(x, ::Type{T}, lazy::Bool) where {T} = lazy ? T(x) : x
+
 # Mode 1: Guided load with (ps, st)
 function load_model(
     store_or_path,
@@ -51,11 +53,7 @@ function load_model(
     ps_loaded = _guided_load_tree(root_g, unwrap(ps), "parameters", scalar_params, lazy)
     st_loaded = _guided_load_tree(root_g, unwrap(st), "states", scalar_states, lazy)
 
-    if lazy
-        return (LazyParameters(ps_loaded), LazyState(st_loaded))
-    else
-        return (ps_loaded, st_loaded)
-    end
+    return (_wrap_lazy(ps_loaded, LazyParameters, lazy), _wrap_lazy(st_loaded, LazyState, lazy))
 end
 
 # Mode 2: Standalone load without model or ps/st
@@ -79,22 +77,11 @@ function load_model(
     model = reconstruct_model_from_info(get(attrs, "model_info", nothing))
 
     if model !== nothing && isdefined(LuxZarr, :_setup_model_skeleton)
-        ps, st = LuxZarr._setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy)
+        ps, st = _setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy)
+        return lazy ? LazyLuxModel(model, LazyParameters(ps), LazyState(st)) : (ps, st, model)
     end
 
-    if lazy
-        if model !== nothing
-            return LazyLuxModel(model, LazyParameters(ps), LazyState(st))
-        else
-            return (LazyParameters(ps), LazyState(st))
-        end
-    else
-        if model !== nothing
-            return (ps, st, model)
-        else
-            return (ps, st)
-        end
-    end
+    return (_wrap_lazy(ps, LazyParameters, lazy), _wrap_lazy(st, LazyState, lazy))
 end
 
 function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dict::AbstractDict, lazy::Bool)
@@ -104,12 +91,7 @@ function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dic
             full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
             z_node = _get_zarr_node(root_g, full_path)
             if z_node isa Zarr.ZArray
-                if lazy
-                    return z_node
-                else
-                    arr_data = Array(z_node)
-                    return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
-                end
+                return lazy ? z_node : adapt(typeof(x), convert(AbstractArray{eltype(x)}, Array(z_node)))
             end
         elseif haskey(scalar_dict, rel_path)
             return _deserialize_scalar(scalar_dict[rel_path], typeof(x))

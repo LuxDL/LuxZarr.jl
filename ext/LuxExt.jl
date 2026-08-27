@@ -31,17 +31,15 @@ function LuxZarr.load_model(
 end
 
 # Callable LazyLuxModel
-(lm::LazyLuxModel)(x) = lm.model(x, Base.materialize(lm.ps), unwrap(lm.st))
-(lm::LazyLuxModel)(x, ps) = lm.model(x, Base.materialize(ps), unwrap(lm.st))
-(lm::LazyLuxModel)(x, ps, st) = lm.model(x, Base.materialize(ps), unwrap(st))
+(lm::LazyLuxModel)(x, ps=lm.ps, st=lm.st) = lm.model(x, Base.materialize(ps), unwrap(st))
 
 # Transparent application of AbstractLuxLayer with LazyParameters / LazyState
 (l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
 (l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
 
 (l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
 (l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
 
 # Model metadata extraction via multiple dispatch

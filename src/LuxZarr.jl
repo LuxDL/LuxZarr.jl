@@ -17,7 +17,7 @@ include("zarr_utils.jl")
 include("model_metadata.jl")
 include("save.jl")
 include("lazy_types.jl")
-include("display.jl")
+include("show.jl")
 include("load.jl")
 
 export save_model, load_model, extract_model_info, reconstruct_model_from_info,
