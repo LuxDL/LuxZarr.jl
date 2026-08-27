@@ -1,7 +1,7 @@
 module LuxExt
 
 using LuxZarr: LuxZarr, extract_model_info, reconstruct_model_from_info, load_model,
-               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf
+               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree
 using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection
 using Functors: Functors
 using Adapt: adapt
@@ -22,117 +22,175 @@ function LuxZarr.load_model(
     return LuxZarr.load_model(store_or_path, ps, st; kwargs...)
 end
 
+# Model metadata extraction via multiple dispatch
 function LuxZarr.extract_model_info(model::AbstractLuxLayer)
-    info = Dict{String, Any}(
+    if hasproperty(model, :layers)
+        return Dict{String, Any}(
+            "type" => string(nameof(typeof(model))),
+            "summary" => string(model),
+            "layers" => [extract_model_info(l) for l in _get_layer_list(model.layers)],
+        )
+    end
+    return Dict{String, Any}(
         "type" => string(nameof(typeof(model))),
         "summary" => string(model),
     )
-    if model isa Lux.Dense
-        info["in_dims"] = model.in_dims
-        info["out_dims"] = model.out_dims
-        info["use_bias"] = Lux.has_bias(model)
-        info["activation"] = string(model.activation)
-    elseif model isa Lux.Conv
-        info["in_chs"] = model.in_chs
-        info["out_chs"] = model.out_chs
-        info["kernel_size"] = collect(model.kernel_size)
-        info["activation"] = string(model.activation)
-        info["use_bias"] = Lux.has_bias(model)
-    elseif model isa Lux.SkipConnection
-        info["layers"] = extract_model_info(model.layers)
-        info["connection"] = string(model.connection)
-    elseif model isa Lux.Chain || model isa Lux.Parallel || model isa Lux.BranchLayer || hasproperty(model, :layers)
-        layers = model.layers
-        layer_list = layers isa NamedTuple ? collect(values(layers)) : (layers isa Tuple || layers isa AbstractVector ? collect(layers) : [layers])
-        info["layers"] = [extract_model_info(l) for l in layer_list]
-    end
-    return info
 end
 
-function _resolve_activation(act_str::AbstractString)
-    if act_str == "identity" || act_str == "typeof(identity)"
-        return identity
-    elseif act_str == "relu" || act_str == "typeof(relu)"
-        return Lux.NNlib.relu
-    elseif act_str == "sigmoid" || act_str == "typeof(sigmoid)" || act_str == "sigmoid_fast"
-        return Lux.NNlib.sigmoid_fast
-    elseif act_str == "tanh" || act_str == "typeof(tanh)" || act_str == "tanh_fast"
-        return Lux.NNlib.tanh_fast
-    elseif act_str == "gelu" || act_str == "typeof(gelu)"
-        return Lux.NNlib.gelu
-    elseif act_str == "leakyrelu" || act_str == "typeof(leakyrelu)"
-        return Lux.NNlib.leakyrelu
-    elseif act_str == "swish" || act_str == "typeof(swish)" || act_str == "silu"
-        return Lux.NNlib.silu
-    else
-        return identity
-    end
+function LuxZarr.extract_model_info(model::Lux.Dense)
+    return Dict{String, Any}(
+        "type" => "Dense",
+        "summary" => string(model),
+        "in_dims" => model.in_dims,
+        "out_dims" => model.out_dims,
+        "use_bias" => Lux.has_bias(model),
+        "activation" => string(model.activation),
+    )
 end
 
+function LuxZarr.extract_model_info(model::Lux.Conv)
+    return Dict{String, Any}(
+        "type" => "Conv",
+        "summary" => string(model),
+        "in_chs" => model.in_chs,
+        "out_chs" => model.out_chs,
+        "kernel_size" => collect(model.kernel_size),
+        "activation" => string(model.activation),
+        "use_bias" => Lux.has_bias(model),
+    )
+end
+
+function LuxZarr.extract_model_info(model::Lux.BatchNorm)
+    return Dict{String, Any}(
+        "type" => "BatchNorm",
+        "summary" => string(model),
+        "chs" => model.chs,
+    )
+end
+
+function LuxZarr.extract_model_info(model::Lux.SkipConnection)
+    return Dict{String, Any}(
+        "type" => "SkipConnection",
+        "summary" => string(model),
+        "layers" => extract_model_info(model.layers),
+        "connection" => string(model.connection),
+    )
+end
+
+function LuxZarr.extract_model_info(model::Union{Lux.Chain, Lux.Parallel, Lux.BranchLayer})
+    return Dict{String, Any}(
+        "type" => string(nameof(typeof(model))),
+        "summary" => string(model),
+        "layers" => [extract_model_info(l) for l in _get_layer_list(model.layers)],
+    )
+end
+
+_get_layer_list(layers::NamedTuple) = values(layers)
+_get_layer_list(layers::Union{Tuple, AbstractVector}) = layers
+_get_layer_list(layers) = (layers,)
+
+const _ACTIVATION_MAP = Dict{String, Function}(
+    "identity" => identity,
+    "typeof(identity)" => identity,
+    "relu" => Lux.NNlib.relu,
+    "typeof(relu)" => Lux.NNlib.relu,
+    "NNlib.relu" => Lux.NNlib.relu,
+    "sigmoid" => Lux.NNlib.sigmoid_fast,
+    "typeof(sigmoid)" => Lux.NNlib.sigmoid_fast,
+    "sigmoid_fast" => Lux.NNlib.sigmoid_fast,
+    "typeof(sigmoid_fast)" => Lux.NNlib.sigmoid_fast,
+    "NNlib.sigmoid_fast" => Lux.NNlib.sigmoid_fast,
+    "σ" => Lux.NNlib.sigmoid_fast,
+    "typeof(σ)" => Lux.NNlib.sigmoid_fast,
+    "NNlib.σ" => Lux.NNlib.sigmoid_fast,
+    "tanh" => Lux.NNlib.tanh_fast,
+    "typeof(tanh)" => Lux.NNlib.tanh_fast,
+    "tanh_fast" => Lux.NNlib.tanh_fast,
+    "typeof(tanh_fast)" => Lux.NNlib.tanh_fast,
+    "NNlib.tanh_fast" => Lux.NNlib.tanh_fast,
+    "gelu" => Lux.NNlib.gelu,
+    "typeof(gelu)" => Lux.NNlib.gelu,
+    "NNlib.gelu" => Lux.NNlib.gelu,
+    "gelu_tanh" => Lux.NNlib.gelu,
+    "typeof(gelu_tanh)" => Lux.NNlib.gelu,
+    "NNlib.gelu_tanh" => Lux.NNlib.gelu,
+    "gelu_accurate" => Lux.NNlib.gelu,
+    "typeof(gelu_accurate)" => Lux.NNlib.gelu,
+    "NNlib.gelu_accurate" => Lux.NNlib.gelu,
+    "leakyrelu" => Lux.NNlib.leakyrelu,
+    "typeof(leakyrelu)" => Lux.NNlib.leakyrelu,
+    "NNlib.leakyrelu" => Lux.NNlib.leakyrelu,
+    "swish" => Lux.NNlib.swish,
+    "typeof(swish)" => Lux.NNlib.swish,
+    "NNlib.swish" => Lux.NNlib.swish,
+    "silu" => Lux.NNlib.swish,
+    "typeof(silu)" => Lux.NNlib.swish,
+)
+
+_resolve_activation(act_str::AbstractString) = get(_ACTIVATION_MAP, act_str, identity)
+
+# Layer reconstruction via dispatch
 function LuxZarr.reconstruct_model_from_info(info::AbstractDict)
-    t = get(info, "type", "")
-    if t == "Dense"
-        in_dims = Int(info["in_dims"])
-        out_dims = Int(info["out_dims"])
-        act = _resolve_activation(string(get(info, "activation", "identity")))
-        use_bias = Bool(get(info, "use_bias", true))
-        return Dense(in_dims => out_dims, act; use_bias=use_bias)
-    elseif t == "Conv"
-        in_chs = Int(info["in_chs"])
-        out_chs = Int(info["out_chs"])
-        k_size = Tuple(Int(x) for x in info["kernel_size"])
-        act = _resolve_activation(string(get(info, "activation", "identity")))
-        use_bias = Bool(get(info, "use_bias", true))
-        return Conv(k_size, in_chs => out_chs, act; use_bias=use_bias)
-    elseif t == "Chain" && haskey(info, "layers")
-        sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-        if any(isnothing, sub_layers)
-            return nothing
-        end
-        return Chain(sub_layers...)
-    elseif t == "Parallel" && haskey(info, "layers")
-        sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-        if any(isnothing, sub_layers)
-            return nothing
-        end
-        return Parallel(+, sub_layers...)
-    elseif t == "BranchLayer" && haskey(info, "layers")
-        sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
-        if any(isnothing, sub_layers)
-            return nothing
-        end
-        return BranchLayer(sub_layers...)
-    elseif t == "BatchNorm"
-        chs = Int(get(info, "chs", 1))
-        return BatchNorm(chs)
-    elseif t == "SkipConnection" && (haskey(info, "layers") || haskey(info, "layer"))
-        sub_l = reconstruct_model_from_info(get(info, "layers", get(info, "layer", nothing)))
-        if sub_l === nothing
-            return nothing
-        end
-        return SkipConnection(sub_l, +)
-    end
-    return nothing
+    t = Symbol(get(info, "type", ""))
+    return _reconstruct_layer(Val(t), info)
+end
+
+_reconstruct_layer(::Val, info::AbstractDict) = nothing
+
+function _reconstruct_layer(::Val{:Dense}, info::AbstractDict)
+    in_dims = Int(info["in_dims"])
+    out_dims = Int(info["out_dims"])
+    act = _resolve_activation(string(get(info, "activation", "identity")))
+    use_bias = Bool(get(info, "use_bias", true))
+    return Dense(in_dims => out_dims, act; use_bias=use_bias)
+end
+
+function _reconstruct_layer(::Val{:Conv}, info::AbstractDict)
+    in_chs = Int(info["in_chs"])
+    out_chs = Int(info["out_chs"])
+    k_size = Tuple(Int(x) for x in info["kernel_size"])
+    act = _resolve_activation(string(get(info, "activation", "identity")))
+    use_bias = Bool(get(info, "use_bias", true))
+    return Conv(k_size, in_chs => out_chs, act; use_bias=use_bias)
+end
+
+function _reconstruct_layer(::Val{:Chain}, info::AbstractDict)
+    haskey(info, "layers") || return nothing
+    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
+    any(isnothing, sub_layers) && return nothing
+    return Chain(sub_layers...)
+end
+
+function _reconstruct_layer(::Val{:Parallel}, info::AbstractDict)
+    haskey(info, "layers") || return nothing
+    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
+    any(isnothing, sub_layers) && return nothing
+    return Parallel(+, sub_layers...)
+end
+
+function _reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict)
+    haskey(info, "layers") || return nothing
+    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
+    any(isnothing, sub_layers) && return nothing
+    return BranchLayer(sub_layers...)
+end
+
+function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict)
+    chs = Int(get(info, "chs", 1))
+    return BatchNorm(chs)
+end
+
+function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict)
+    layer_info = get(info, "layers", get(info, "layer", nothing))
+    layer_info === nothing && return nothing
+    sub_l = reconstruct_model_from_info(layer_info)
+    sub_l === nothing && return nothing
+    return SkipConnection(sub_l, +)
 end
 
 function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states)
     _, st_skeleton = Lux.setup(default_rng(), model)
-    if isempty(st)
-        st = st_skeleton
-    else
-        st = Functors.fmap_with_path(st_skeleton; exclude=_isleaf) do kp, x
-            rel_path = _keypath_to_path(kp)
-            full_path = "states/" * rel_path
-            z_node = _get_zarr_node(root_g, full_path)
-            if z_node isa Zarr.ZArray
-                arr_data = Array(z_node)
-                return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
-            elseif haskey(scalar_states, rel_path)
-                return _deserialize_scalar(scalar_states[rel_path], typeof(x))
-            end
-            return x
-        end
-    end
+    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states)
     return (ps, st)
 end
 

@@ -41,45 +41,13 @@ function load_model(
 )
     root_g = _open_root_group(store_or_path)
     attrs = Dict{String, Any}(root_g.attrs)
-
-    if metadata_only
-        return attrs
-    end
+    metadata_only && return attrs
 
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     scalar_states = get(attrs, "scalar_states", Dict{String, Any}())
 
-    # Guided parameter loading
-    ps_loaded = Functors.fmap_with_path(ps; exclude=_isleaf) do kp, x
-        if x isa AbstractArray
-            rel_path = _keypath_to_path(kp)
-            full_path = "parameters/" * rel_path
-            z_node = _get_zarr_node(root_g, full_path)
-            if z_node isa Zarr.ZArray
-                arr_data = Array(z_node)
-                return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
-            end
-        elseif haskey(scalar_params, _keypath_to_path(kp))
-            return _deserialize_scalar(scalar_params[_keypath_to_path(kp)], typeof(x))
-        end
-        return x
-    end
-
-    # Guided state loading
-    st_loaded = Functors.fmap_with_path(st; exclude=_isleaf) do kp, x
-        if x isa AbstractArray
-            rel_path = _keypath_to_path(kp)
-            full_path = "states/" * rel_path
-            z_node = _get_zarr_node(root_g, full_path)
-            if z_node isa Zarr.ZArray
-                arr_data = Array(z_node)
-                return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
-            end
-        elseif haskey(scalar_states, _keypath_to_path(kp))
-            return _deserialize_scalar(scalar_states[_keypath_to_path(kp)], typeof(x))
-        end
-        return x
-    end
+    ps_loaded = _guided_load_tree(root_g, ps, "parameters", scalar_params)
+    st_loaded = _guided_load_tree(root_g, st, "states", scalar_states)
 
     return (ps_loaded, st_loaded)
 end
@@ -92,61 +60,56 @@ function load_model(
 )
     root_g = _open_root_group(store_or_path)
     attrs = Dict{String, Any}(root_g.attrs)
-
-    if metadata_only
-        return attrs
-    end
+    metadata_only && return attrs
 
     param_keypaths = get(attrs, "parameter_keypaths", [])
     state_keypaths = get(attrs, "state_keypaths", [])
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     scalar_states = get(attrs, "scalar_states", Dict{String, Any}())
 
-    # Load parameter arrays
-    param_entries = Pair{KeyPath, Any}[]
-    for raw_kp in param_keypaths
-        kp = _deserialize_keypath(raw_kp)
-        rel_path = _keypath_to_path(kp)
-        full_path = "parameters/" * rel_path
-        z_node = _get_zarr_node(root_g, full_path)
-        if z_node isa Zarr.ZArray
-            push!(param_entries, kp => Array(z_node))
-        end
-    end
-    for (path_str, val) in scalar_params
-        tokens = split(path_str, "/")
-        kp = _deserialize_keypath(tokens)
-        push!(param_entries, kp => _deserialize_scalar(val, Any))
-    end
-
-    # Load state arrays
-    state_entries = Pair{KeyPath, Any}[]
-    for raw_kp in state_keypaths
-        kp = _deserialize_keypath(raw_kp)
-        rel_path = _keypath_to_path(kp)
-        full_path = "states/" * rel_path
-        z_node = _get_zarr_node(root_g, full_path)
-        if z_node isa Zarr.ZArray
-            push!(state_entries, kp => Array(z_node))
-        end
-    end
-    for (path_str, val) in scalar_states
-        tokens = split(path_str, "/")
-        kp = _deserialize_keypath(tokens)
-        push!(state_entries, kp => _deserialize_scalar(val, Any))
-    end
-
-    ps = _reconstruct_from_keypaths(param_entries)
-    st = _reconstruct_from_keypaths(state_entries)
+    ps = _reconstruct_from_keypaths(_load_tree_entries(root_g, "parameters", param_keypaths, scalar_params))
+    st = _reconstruct_from_keypaths(_load_tree_entries(root_g, "states", state_keypaths, scalar_states))
     model = reconstruct_model_from_info(get(attrs, "model_info", nothing))
 
     if model !== nothing && isdefined(LuxZarr, :_setup_model_skeleton)
         ps, st = LuxZarr._setup_model_skeleton(model, root_g, ps, st, scalar_states)
     end
 
-    if model !== nothing
-        return (ps, st, model)
-    else
-        return (ps, st)
+    return model !== nothing ? (ps, st, model) : (ps, st)
+end
+
+function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dict::AbstractDict)
+    return Functors.fmap_with_path(tree; exclude=_isleaf) do kp, x
+        rel_path = _keypath_to_path(kp)
+        if x isa AbstractArray
+            full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
+            z_node = _get_zarr_node(root_g, full_path)
+            if z_node isa Zarr.ZArray
+                arr_data = Array(z_node)
+                return adapt(typeof(x), convert(AbstractArray{eltype(x)}, arr_data))
+            end
+        elseif haskey(scalar_dict, rel_path)
+            return _deserialize_scalar(scalar_dict[rel_path], typeof(x))
+        end
+        return x
     end
+end
+
+function _load_tree_entries(root_g::Zarr.ZGroup, prefix::String, raw_keypaths, scalar_dict::AbstractDict)
+    entries = Pair{KeyPath, Any}[]
+    for raw_kp in raw_keypaths
+        kp = _deserialize_keypath(raw_kp)
+        rel_path = _keypath_to_path(kp)
+        full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
+        z_node = _get_zarr_node(root_g, full_path)
+        if z_node isa Zarr.ZArray
+            push!(entries, kp => Array(z_node))
+        end
+    end
+    for (path_str, val) in scalar_dict
+        tokens = split(path_str, '/')
+        kp = _deserialize_keypath(tokens)
+        push!(entries, kp => _deserialize_scalar(val, Any))
+    end
+    return entries
 end

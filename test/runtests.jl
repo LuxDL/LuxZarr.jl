@@ -217,4 +217,50 @@ using Zarr
             @test ps_loaded.weight == ps.weight
         end
     end
+
+    @testset "Diverse Activation Functions and Model Reconstruction" begin
+        for act in (gelu, tanh, sigmoid, Lux.NNlib.swish, Lux.NNlib.leakyrelu)
+            model = Chain(Dense(2 => 3, act), Dense(3 => 1))
+            ps, st = Lux.setup(rng, model)
+            x = randn(rng, Float32, 2, 2)
+            y, _ = model(x, ps, st)
+
+            mktempdir() do tmp_dir
+                save_path = joinpath(tmp_dir, "act_model.zarr")
+                save_model(save_path, ps, st; model=model)
+
+                ps_loaded, st_loaded, model_rec = load_model(save_path)
+                @test model_rec isa Chain
+                y_rec, _ = model_rec(x, ps_loaded, st_loaded)
+                @test y ≈ y_rec
+            end
+        end
+    end
+
+    @testset "Scalar Deserialization & KeyPath Helpers" begin
+        kp_empty = LuxZarr.KeyPath()
+        @test LuxZarr._keypath_to_path(kp_empty) == ""
+        @test LuxZarr._serialize_keypath(kp_empty) == []
+
+        kp = LuxZarr.KeyPath(:layer_1, 2, :weight)
+        @test LuxZarr._keypath_to_path(kp) == "layer_1/2/weight"
+        serialized = LuxZarr._serialize_keypath(kp)
+        @test serialized == [":layer_1", 2, ":weight"]
+        deserialized = LuxZarr._deserialize_keypath(serialized)
+        @test deserialized.keys == (:layer_1, 2, :weight)
+
+        # Scalar deserialization
+        @test LuxZarr._deserialize_scalar(Dict("__type__" => "Symbol", "value" => "mode"), Symbol) == :mode
+        @test LuxZarr._deserialize_scalar(Dict("__type__" => "Val", "value" => true), Any) == Val(true)
+        @test LuxZarr._deserialize_scalar("Val{true}", Any) == Val(true)
+        @test LuxZarr._deserialize_scalar(":test_sym", Symbol) == :test_sym
+        @test LuxZarr._deserialize_scalar(42, Float32) === 42.0f0
+
+        # Chunk computation dispatch
+        arr = randn(Float32, 4, 8)
+        @test LuxZarr._compute_chunks(nothing, arr) == (4, 8)
+        @test LuxZarr._compute_chunks(a -> (2, 2), arr) == (2, 2)
+        @test LuxZarr._compute_chunks((2, 2), arr) == (2, 2)
+        @test LuxZarr._compute_chunks((10, 10), arr) == (4, 8)
+    end
 end

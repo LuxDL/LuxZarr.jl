@@ -4,7 +4,6 @@ using Functors: Functors, KeyPath
 using LuxCore: LuxCore, AbstractLuxLayer
 using MLDataDevices: MLDataDevices, isleaf, cpu_device
 using Adapt: adapt
-using Random: Random, default_rng
 using Zarr: Zarr
 
 # Extension hooks with dispatch

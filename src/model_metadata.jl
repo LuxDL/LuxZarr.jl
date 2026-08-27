@@ -1,9 +1,9 @@
 """
-    extract_model_info(model) -> Optional{Dict{String, Any}}
+    extract_model_info(model) -> Union{Dict{String, Any}, Nothing}
 
 Extract architectural metadata from a model layer for saving into Zarr attributes.
-Returns `nothing` if the model type does not have a dedicated extractor.
-Can be extended for custom user layers.
+Returns `nothing` if `model` is `nothing`. For generic models, returns a dictionary containing
+the model's type name and string representation. Can be extended via multiple dispatch for custom layers.
 """
 function extract_model_info(model)
     return Dict{String, Any}(
@@ -14,20 +14,16 @@ end
 extract_model_info(::Nothing) = nothing
 
 """
-    reconstruct_model_from_info(info) -> Optional{Any}
+    reconstruct_model_from_info(info) -> Union{Any, Nothing}
 
 Reconstruct a model layer struct from metadata dictionary `info`.
-Returns `nothing` if the model cannot be reconstructed.
-Can be extended for custom user layers.
+Returns `nothing` if the model cannot be reconstructed or if `info` is `nothing`.
+Can be extended via multiple dispatch for custom layers.
 """
-function reconstruct_model_from_info(info)
-    return nothing
-end
+reconstruct_model_from_info(info) = nothing
 
+_get_model_summary(::Nothing) = nothing
 function _get_model_summary(model)
-    if model === nothing
-        return nothing
-    end
     try
         return sprint(show, MIME("text/plain"), model)
     catch
