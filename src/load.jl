@@ -79,7 +79,7 @@ function load_model(
     st = _reconstruct_from_keypaths(_load_tree_entries(root_g, "states", state_keypaths, scalar_states, lazy))
     model = reconstruct_model_from_info(get(attrs, "model_info", nothing); kwargs...)
 
-    if model !== nothing && isdefined(LuxZarr, :_setup_model_skeleton)
+    if !isnothing(model) && isdefined(LuxZarr, :_setup_model_skeleton)
         ps, st = _setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy)
         return lazy ? LazyLuxModel(model, LazyParameters(ps), LazyState(st)) : (ps, st, model)
     end

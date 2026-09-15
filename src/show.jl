@@ -52,13 +52,12 @@ function _print_tree_node(io::IO, name::String, val, prefix::String, is_last::Bo
     elseif val isa AbstractArray
         tag = is_all_lazy || val isa Zarr.ZArray ? "" : "  [in-memory $(nameof(typeof(val)))]"
         println(io, prefix, branch, name, ": ", eltype(val), " ", size(val), tag)
-    elseif val !== nothing
+    elseif !isnothing(val)
         println(io, prefix, branch, name, ": ", sprint(show, val))
     end
 end
 
-function _show_tree(io::IO, data; title::String = "", unit::String = "parameters", status_suffix::String = "")
-    stats = _collect_tree_stats(data)
+function _show_tree(io::IO, data; title::String = "", unit::String = "parameters", status_suffix::String = "", stats::_TreeStats = _collect_tree_stats(data))
     is_all_lazy = stats.num_in_memory == 0 && stats.num_lazy > 0
 
     header = if !isempty(title)
@@ -89,7 +88,7 @@ Base.show(io::IO, ::MIME"text/plain", ls::LazyState) = _show_tree(io, unwrap(ls)
 function Base.show(io::IO, ::MIME"text/plain", lm::LazyLuxModel)
     stats = _collect_tree_stats(unwrap(lm.ps))
     status = "$(_format_count(stats.num_lazy)) on-disk / $(_format_count(stats.num_in_memory)) in-memory"
-    return _show_tree(io, unwrap(lm.ps); title = "LazyLuxModel ($(nameof(typeof(lm.model)))):", status_suffix = status)
+    return _show_tree(io, unwrap(lm.ps); title = "LazyLuxModel ($(nameof(typeof(lm.model)))):", status_suffix = status, stats = stats)
 end
 
 Base.show(io::IO, lp::LazyParameters) = print(io, "LazyParameters(", length(keys(lp)), " entries)")

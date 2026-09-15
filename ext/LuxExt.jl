@@ -113,11 +113,18 @@ function LuxZarr.extract_model_info(model::Lux.WrappedFunction)
 end
 
 function LuxZarr.extract_model_info(model::Lux.Dropout)
+    dims_info = if model.dims isa Colon
+        ":"
+    elseif model.dims isa Union{Tuple, AbstractVector}
+        collect(model.dims)
+    else
+        string(model.dims)
+    end
     return Dict{String, Any}(
         "type" => "Dropout",
         "summary" => string(model),
         "p" => Float64(model.p),
-        "dims" => collect(model.dims),
+        "dims" => dims_info,
     )
 end
 
@@ -225,9 +232,14 @@ end
 
 function _reconstruct_layer(::Val{:Dropout}, info::AbstractDict; kwargs...)
     p = Float32(get(info, "p", 0.5))
-    dims_raw = get(info, "dims", ())
-    dims = Tuple(Int(d) for d in dims_raw)
-    return isempty(dims) ? Dropout(p) : Dropout(p; dims = dims)
+    dims_raw = get(info, "dims", ":")
+    if dims_raw == ":" || isnothing(dims_raw) || isempty(dims_raw)
+        return Dropout(p)
+    elseif dims_raw isa Union{AbstractVector, Tuple}
+        return Dropout(p; dims = Tuple(Int(d) for d in dims_raw))
+    else
+        return Dropout(p)
+    end
 end
 
 function _reconstruct_layer(::Val{:NoOpLayer}, info::AbstractDict; kwargs...)
@@ -236,9 +248,9 @@ end
 
 function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; kwargs...)
     layer_info = get(info, "layers", get(info, "layer", nothing))
-    layer_info === nothing && return nothing
+    isnothing(layer_info) && return nothing
     sub_l = reconstruct_model_from_info(layer_info; kwargs...)
-    sub_l === nothing && return nothing
+    isnothing(sub_l) && return nothing
     return SkipConnection(sub_l, +)
 end
 

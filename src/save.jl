@@ -74,14 +74,14 @@ function save_model(
         "user_metadata" => meta_dict,
     )
     lux_v = _get_lux_version(Val(:Lux))
-    if lux_v === nothing && model !== nothing
+    if isnothing(lux_v) && !isnothing(model)
         lux_v = _get_lux_version(model)
     end
-    if lux_v !== nothing
+    if !isnothing(lux_v)
         root_attrs["lux_version"] = lux_v
     end
 
-    if model !== nothing
+    if !isnothing(model)
         root_attrs["model_info"] = extract_model_info(model)
         root_attrs["model_summary"] = _get_model_summary(model)
     end
@@ -139,7 +139,7 @@ function _collect_arrays_and_scalars(tree)
                 arr = Array(cpu_dev(x))
                 push!(array_entries, (kp, arr))
             end
-        elseif x !== nothing
+        elseif !isnothing(x)
             scalar_dict[_keypath_to_path(kp)] = _serialize_scalar(x)
         end
         return x
@@ -173,7 +173,7 @@ function _write_array_entries!(parent_g::Zarr.ZGroup, subgroup_name::String, ent
         end
         leaf_name = string(keys_tuple[end])
         arr_chunks = _compute_chunks(chunks, arr)
-        kw = compressor === nothing ? (; chunks = arr_chunks) : (; chunks = arr_chunks, compressor = compressor)
+        kw = isnothing(compressor) ? (; chunks = arr_chunks) : (; chunks = arr_chunks, compressor = compressor)
         z_arr = Zarr.zcreate(eltype(arr), curr_g, leaf_name, size(arr)...; kw...)
         z_arr[ntuple(_ -> Colon(), ndims(arr))...] = arr
     end
