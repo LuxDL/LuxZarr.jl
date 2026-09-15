@@ -363,10 +363,98 @@ using Zarr
         end
     end
 
+    @testset "Faithful Reconstruction and Error Handling" begin
+        # 1. Softplus and other activations
+        model_softplus = Chain(Dense(3 => 4, softplus), Dense(4 => 2))
+        ps_sp, st_sp = Lux.setup(rng, model_softplus)
+        x_sp = randn(rng, Float32, 3, 2)
+        y_sp, _ = model_softplus(x_sp, ps_sp, st_sp)
+
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "softplus_model.zarr")
+            save_model(save_path, ps_sp, st_sp; model = model_softplus)
+
+            lazy_sp = load_model(save_path)
+            @test lazy_sp isa LazyLuxModel
+            @test lazy_sp.model.layers[1].activation === Lux.NNlib.softplus
+            y_sp_loaded, _ = lazy_sp(x_sp)
+            @test y_sp ≈ y_sp_loaded
+        end
+
+        # 2. Parallel with vcat
+        model_parallel_vcat = Parallel(vcat, Dense(3 => 2), Dense(3 => 2))
+        ps_pv, st_pv = Lux.setup(rng, model_parallel_vcat)
+        x_pv = randn(rng, Float32, 3, 2)
+        y_pv, _ = model_parallel_vcat(x_pv, ps_pv, st_pv)
+        @test size(y_pv) == (4, 2)
+
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "parallel_vcat.zarr")
+            save_model(save_path, ps_pv, st_pv; model = model_parallel_vcat)
+
+            lazy_pv = load_model(save_path)
+            @test lazy_pv isa LazyLuxModel
+            @test lazy_pv.model.connection === vcat
+            y_pv_loaded, _ = lazy_pv(x_pv)
+            @test size(y_pv_loaded) == (4, 2)
+            @test y_pv ≈ y_pv_loaded
+        end
+
+        # 3. SkipConnection with multiplication
+        model_skip = SkipConnection(Dense(3 => 3), *)
+        ps_sk, st_sk = Lux.setup(rng, model_skip)
+        x_sk = randn(rng, Float32, 3, 3)
+        y_sk, _ = model_skip(x_sk, ps_sk, st_sk)
+
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "skip_mul.zarr")
+            save_model(save_path, ps_sk, st_sk; model = model_skip)
+
+            lazy_sk = load_model(save_path)
+            @test lazy_sk isa LazyLuxModel
+            @test lazy_sk.model.connection === *
+            y_sk_loaded, _ = lazy_sk(x_sk)
+            @test y_sk ≈ y_sk_loaded
+        end
+
+        # 4. BatchNorm non-default parameters
+        bn_custom = BatchNorm(4, relu; epsilon = 1.0f-3, momentum = 0.2f0, affine = false, track_stats = false)
+        ps_bn, st_bn = Lux.setup(rng, bn_custom)
+
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "bn_custom.zarr")
+            save_model(save_path, ps_bn, st_bn; model = bn_custom)
+
+            lazy_bn = load_model(save_path)
+            @test lazy_bn isa LazyLuxModel
+            @test lazy_bn.model.epsilon ≈ 1.0f-3
+            @test lazy_bn.model.momentum ≈ 0.2f0
+            @test lazy_bn.model.affine == false
+            @test lazy_bn.model.track_stats == false
+            @test lazy_bn.model.activation === Lux.NNlib.relu
+        end
+
+        # 5. Error on unknown activation during standalone reconstruction
+        info_bad_act = Dict{String, Any}(
+            "type" => "Dense",
+            "in_dims" => 3,
+            "out_dims" => 2,
+            "activation" => "my_unregistered_activation_fn",
+            "use_bias" => true,
+        )
+        @test_throws ArgumentError reconstruct_model_from_info(info_bad_act)
+
+        # 6. Error on unknown layer type
+        info_unknown_layer = Dict{String, Any}("type" => "CompletelyUnknownLayerType123")
+        @test_throws ArgumentError reconstruct_model_from_info(info_unknown_layer)
+    end
+
     @testset "kwargs in load_model and custom reconstruction" begin
         struct CustomLayer <: LuxCore.AbstractLuxLayer end
         LuxZarr.extract_model_info(::CustomLayer) = Dict{String, Any}("type" => "CustomLayer")
-        LuxZarr._reconstruct_layer(::Val{:CustomLayer}, info::AbstractDict; custom_opt = false, kwargs...) = custom_opt ? CustomLayer() : nothing
+        function LuxZarr.reconstruct_layer(::Val{:CustomLayer}, info::AbstractDict; custom_opt = false, kwargs...)
+            custom_opt ? CustomLayer() : throw(ArgumentError("custom_opt required"))
+        end
 
         model = CustomLayer()
         ps, st = NamedTuple(), NamedTuple()
@@ -374,9 +462,8 @@ using Zarr
             save_path = joinpath(tmp_dir, "custom_layer.zarr")
             save_model(save_path, ps, st; model = model)
 
-            # Without kwargs, custom_opt defaults to false -> returns nothing / ps, st
-            ps_loaded, st_loaded = load_model(save_path)
-            @test !(ps_loaded isa LazyLuxModel)
+            # Without custom_opt=true, reconstruction throws ArgumentError
+            @test_throws ArgumentError load_model(save_path)
 
             # With custom_opt=true forwarded via kwargs...
             lazy_loaded = load_model(save_path; custom_opt = true)
