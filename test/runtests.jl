@@ -505,15 +505,27 @@ using Zarr
 
         custom_m = MyLinearLayer(5, 3, relu)
         ps_c, st_c = Lux.setup(rng, custom_m)
+        x_c = randn(rng, Float32, 5, 2)
+        y_expected, _ = custom_m(x_c, ps_c, st_c)
+
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "mylinear.zarr")
             save_model(save_path, ps_c, st_c; model = custom_m)
 
+            # Lazy standalone load and evaluation
             lazy_custom = load_model(save_path)
             @test lazy_custom isa LazyLuxModel
             @test lazy_custom.model.in_dims == 5
             @test lazy_custom.model.out_dims == 3
             @test lazy_custom.model.activation === Lux.NNlib.relu
+            y_lazy, _ = lazy_custom(x_c)
+            @test y_lazy ≈ y_expected
+
+            # Eager standalone load
+            ps_eager, st_eager, m_eager = load_model(save_path; lazy = false)
+            @test m_eager isa MyLinearLayer
+            @test m_eager.in_dims == 5
+            @test ps_eager.weight == ps_c.weight
         end
     end
 end
