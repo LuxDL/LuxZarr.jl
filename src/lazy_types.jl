@@ -86,4 +86,4 @@ function materialize(x; device = nothing)
     return isnothing(device) ? m : device(m)
 end
 
-materialize(dev::MLDataDevices.AbstractDevice, x) = materialize(x; device = dev)
+materialize(dev, x) = materialize(x; device = dev)

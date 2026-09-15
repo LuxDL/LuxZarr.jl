@@ -1,0 +1,9 @@
+[deps]
+LuxZarr = "8da8d8e8-4d76-4e80-818b-a3b53cc9b4a2"
+ExplicitImports = "7d51a73a-1435-4ff3-83d9-f097790105c7"
+
+[sources]
+LuxZarr = {path = "../.."}
+
+[compat]
+ExplicitImports = "1.15"
