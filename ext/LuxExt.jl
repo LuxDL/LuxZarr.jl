@@ -3,7 +3,8 @@ module LuxExt
 using LuxZarr: LuxZarr,
     _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
     LazyParameters, LazyState, LazyLuxModel, unwrap, materialize
-import LuxZarr: extract_model_info, reconstruct_model_from_info, load_model, reconstruct_layer, _setup_model_skeleton
+import LuxZarr: extract_model_info, reconstruct_model_from_info, load_model, reconstruct_layer,
+    resolve_activation, resolve_connection, _setup_model_skeleton
 using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection,
     WrappedFunction, Dropout, NoOpLayer
 using LuxCore: LuxCore
@@ -202,13 +203,13 @@ const _CONNECTION_MAP = Dict{String, Function}(
     "hcat" => hcat,
 )
 
-function _resolve_activation(act_str::AbstractString)
+function LuxZarr.resolve_activation(act_str::AbstractString)
     key = _normalize_identifier(act_str)
     haskey(_ACTIVATION_MAP, key) && return _ACTIVATION_MAP[key]
     throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized activation function '$(act_str)'."))
 end
 
-function _resolve_connection(conn_str::AbstractString)
+function LuxZarr.resolve_connection(conn_str::AbstractString)
     key = _normalize_identifier(conn_str)
     haskey(_CONNECTION_MAP, key) && return _CONNECTION_MAP[key]
     throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized connection function '$(conn_str)'."))
@@ -218,7 +219,7 @@ end
 function LuxZarr.reconstruct_layer(::Val{:Dense}, info::AbstractDict; kwargs...)
     in_dims = Int(info["in_dims"])
     out_dims = Int(info["out_dims"])
-    act = _resolve_activation(string(get(info, "activation", "identity")))
+    act = resolve_activation(string(get(info, "activation", "identity")))
     use_bias = Bool(get(info, "use_bias", true))
     return Dense(in_dims => out_dims, act; use_bias = use_bias)
 end
@@ -227,7 +228,7 @@ function LuxZarr.reconstruct_layer(::Val{:Conv}, info::AbstractDict; kwargs...)
     in_chs = Int(info["in_chs"])
     out_chs = Int(info["out_chs"])
     k_size = Tuple(Int(x) for x in info["kernel_size"])
-    act = _resolve_activation(string(get(info, "activation", "identity")))
+    act = resolve_activation(string(get(info, "activation", "identity")))
     use_bias = Bool(get(info, "use_bias", true))
     return Conv(k_size, in_chs => out_chs, act; use_bias = use_bias)
 end
@@ -242,7 +243,7 @@ LuxZarr.reconstruct_layer(::Val{:Chain}, info::AbstractDict; kwargs...) = _recon
 
 function LuxZarr.reconstruct_layer(::Val{:Parallel}, info::AbstractDict; kwargs...)
     conn_str = string(get(info, "connection", "+"))
-    op = _resolve_connection(conn_str)
+    op = resolve_connection(conn_str)
     return _reconstruct_container(layers -> Parallel(op, layers...), info; kwargs...)
 end
 
@@ -250,7 +251,7 @@ LuxZarr.reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict; kwargs...) = 
 
 function LuxZarr.reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict; kwargs...)
     chs = Int(get(info, "chs", 1))
-    act = _resolve_activation(string(get(info, "activation", "identity")))
+    act = resolve_activation(string(get(info, "activation", "identity")))
     ϵ = Float32(get(info, "epsilon", 1.0e-5))
     momentum = Float32(get(info, "momentum", 0.1))
     affine = Bool(get(info, "affine", true))
@@ -260,7 +261,7 @@ end
 
 function LuxZarr.reconstruct_layer(::Val{:WrappedFunction}, info::AbstractDict; kwargs...)
     func_str = string(get(info, "func", "identity"))
-    fn = _resolve_activation(func_str)
+    fn = resolve_activation(func_str)
     return WrappedFunction(fn)
 end
 
@@ -285,7 +286,7 @@ function LuxZarr.reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; k
     isnothing(layer_info) && throw(ArgumentError("SkipConnection layer metadata missing sub-layer info."))
     sub_l = reconstruct_model_from_info(layer_info; kwargs...)
     conn_str = string(get(info, "connection", "+"))
-    op = _resolve_connection(conn_str)
+    op = resolve_connection(conn_str)
     return SkipConnection(sub_l, op)
 end
 

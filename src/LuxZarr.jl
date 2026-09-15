@@ -10,6 +10,8 @@ using Zarr: Zarr
 _get_lux_version(::Any) = nothing
 function _setup_model_skeleton end
 function reconstruct_layer end
+function resolve_activation end
+function resolve_connection end
 
 include("keypaths.jl")
 include("scalars.jl")
@@ -22,6 +24,7 @@ include("show.jl")
 include("load.jl")
 
 export save_model, load_model, extract_model_info, reconstruct_model_from_info,
-    reconstruct_layer, LazyParameters, LazyState, LazyLuxModel, unwrap, materialize
+    reconstruct_layer, resolve_activation, resolve_connection,
+    LazyParameters, LazyState, LazyLuxModel, unwrap, materialize
 
 end # module LuxZarr
