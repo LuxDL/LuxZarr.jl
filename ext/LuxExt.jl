@@ -2,8 +2,8 @@ module LuxExt
 
 using LuxZarr: LuxZarr,
     _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
-    LazyParameters, LazyState, LazyLuxModel, unwrap
-import LuxZarr: extract_model_info, reconstruct_model_from_info, load_model, _reconstruct_layer, _setup_model_skeleton
+    LazyParameters, LazyState, LazyLuxModel, unwrap, materialize
+import LuxZarr: extract_model_info, reconstruct_model_from_info, load_model, reconstruct_layer, _setup_model_skeleton
 using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection,
     WrappedFunction, Dropout, NoOpLayer
 using LuxCore: LuxCore
@@ -38,16 +38,16 @@ function LuxZarr.load_model(
 end
 
 # Callable LazyLuxModel
-(lm::LazyLuxModel)(x, ps = lm.ps, st = lm.st) = lm.model(x, Base.materialize(ps), Base.materialize(st))
+(lm::LazyLuxModel)(x, ps = lm.ps, st = lm.st) = lm.model(x, materialize(ps), materialize(st))
 
 # Transparent application of AbstractLuxLayer with LazyParameters / LazyState
-(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
-(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, Base.materialize(ps), Base.materialize(st))
-(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, materialize(ps), materialize(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, materialize(ps), materialize(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, materialize(ps), materialize(st))
 
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, Base.materialize(ps), Base.materialize(st))
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, materialize(ps), materialize(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, materialize(ps), materialize(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, materialize(ps), materialize(st))
 
 # Model metadata extraction via multiple dispatch
 function LuxZarr.extract_model_info(model::AbstractLuxLayer)
@@ -92,6 +92,20 @@ function LuxZarr.extract_model_info(model::Lux.BatchNorm)
         "type" => "BatchNorm",
         "summary" => string(model),
         "chs" => model.chs,
+        "activation" => string(model.activation),
+        "epsilon" => Float64(model.epsilon),
+        "momentum" => Float64(model.momentum),
+        "affine" => Bool(model.affine),
+        "track_stats" => Bool(model.track_stats),
+    )
+end
+
+function LuxZarr.extract_model_info(model::Lux.Parallel)
+    return Dict{String, Any}(
+        "type" => "Parallel",
+        "summary" => string(model),
+        "connection" => string(model.connection),
+        "layers" => [extract_model_info(l) for l in _get_layer_list(model.layers)],
     )
 end
 
@@ -186,12 +200,72 @@ const _ACTIVATION_MAP = Dict{String, Function}(
     "NNlib.swish" => Lux.NNlib.swish,
     "silu" => Lux.NNlib.swish,
     "typeof(silu)" => Lux.NNlib.swish,
+    "NNlib.silu" => Lux.NNlib.swish,
+    "softplus" => Lux.NNlib.softplus,
+    "typeof(softplus)" => Lux.NNlib.softplus,
+    "NNlib.softplus" => Lux.NNlib.softplus,
+    "softsign" => Lux.NNlib.softsign,
+    "typeof(softsign)" => Lux.NNlib.softsign,
+    "NNlib.softsign" => Lux.NNlib.softsign,
+    "celu" => Lux.NNlib.celu,
+    "typeof(celu)" => Lux.NNlib.celu,
+    "NNlib.celu" => Lux.NNlib.celu,
+    "elu" => Lux.NNlib.elu,
+    "typeof(elu)" => Lux.NNlib.elu,
+    "NNlib.elu" => Lux.NNlib.elu,
+    "mish" => Lux.NNlib.mish,
+    "typeof(mish)" => Lux.NNlib.mish,
+    "NNlib.mish" => Lux.NNlib.mish,
+    "selu" => Lux.NNlib.selu,
+    "typeof(selu)" => Lux.NNlib.selu,
+    "NNlib.selu" => Lux.NNlib.selu,
+    "lisht" => Lux.NNlib.lisht,
+    "typeof(lisht)" => Lux.NNlib.lisht,
+    "NNlib.lisht" => Lux.NNlib.lisht,
+    "logsigmoid" => Lux.NNlib.logsigmoid,
+    "typeof(logsigmoid)" => Lux.NNlib.logsigmoid,
+    "NNlib.logsigmoid" => Lux.NNlib.logsigmoid,
+    "tanhshrink" => Lux.NNlib.tanhshrink,
+    "typeof(tanhshrink)" => Lux.NNlib.tanhshrink,
+    "NNlib.tanhshrink" => Lux.NNlib.tanhshrink,
+    "hardsigmoid" => Lux.NNlib.hardsigmoid,
+    "typeof(hardsigmoid)" => Lux.NNlib.hardsigmoid,
+    "NNlib.hardsigmoid" => Lux.NNlib.hardsigmoid,
+    "hardswish" => Lux.NNlib.hardswish,
+    "typeof(hardswish)" => Lux.NNlib.hardswish,
+    "NNlib.hardswish" => Lux.NNlib.hardswish,
 )
 
-_resolve_activation(act_str::AbstractString) = get(_ACTIVATION_MAP, act_str, identity)
+const _CONNECTION_MAP = Dict{String, Function}(
+    "+" => +,
+    "typeof(+)" => +,
+    "Base.:+" => +,
+    "-" => -,
+    "typeof(-)" => -,
+    "Base.:-" => -,
+    "*" => *,
+    "typeof(*)" => *,
+    "Base.:*" => *,
+    "vcat" => vcat,
+    "typeof(vcat)" => vcat,
+    "Base.vcat" => vcat,
+    "hcat" => hcat,
+    "typeof(hcat)" => hcat,
+    "Base.hcat" => hcat,
+)
+
+function _resolve_activation(act_str::AbstractString)
+    haskey(_ACTIVATION_MAP, act_str) && return _ACTIVATION_MAP[act_str]
+    throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized activation function '$(act_str)'."))
+end
+
+function _resolve_connection(conn_str::AbstractString)
+    haskey(_CONNECTION_MAP, conn_str) && return _CONNECTION_MAP[conn_str]
+    throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized connection function '$(conn_str)'."))
+end
 
 # Layer reconstruction via dispatch
-function LuxZarr._reconstruct_layer(::Val{:Dense}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:Dense}, info::AbstractDict; kwargs...)
     in_dims = Int(info["in_dims"])
     out_dims = Int(info["out_dims"])
     act = _resolve_activation(string(get(info, "activation", "identity")))
@@ -199,7 +273,7 @@ function LuxZarr._reconstruct_layer(::Val{:Dense}, info::AbstractDict; kwargs...
     return Dense(in_dims => out_dims, act; use_bias = use_bias)
 end
 
-function _reconstruct_layer(::Val{:Conv}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:Conv}, info::AbstractDict; kwargs...)
     in_chs = Int(info["in_chs"])
     out_chs = Int(info["out_chs"])
     k_size = Tuple(Int(x) for x in info["kernel_size"])
@@ -209,28 +283,38 @@ function _reconstruct_layer(::Val{:Conv}, info::AbstractDict; kwargs...)
 end
 
 function _reconstruct_container(f, info::AbstractDict; kwargs...)
-    haskey(info, "layers") || return nothing
+    haskey(info, "layers") || throw(ArgumentError("Container layer metadata missing 'layers' entry."))
     sub_layers = [reconstruct_model_from_info(l; kwargs...) for l in info["layers"]]
-    any(isnothing, sub_layers) && return nothing
     return f(sub_layers)
 end
 
-_reconstruct_layer(::Val{:Chain}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> Chain(layers...), info; kwargs...)
-_reconstruct_layer(::Val{:Parallel}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> Parallel(+, layers...), info; kwargs...)
-_reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> BranchLayer(layers...), info; kwargs...)
+LuxZarr.reconstruct_layer(::Val{:Chain}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> Chain(layers...), info; kwargs...)
 
-function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict; kwargs...)
-    chs = Int(get(info, "chs", 1))
-    return BatchNorm(chs)
+function LuxZarr.reconstruct_layer(::Val{:Parallel}, info::AbstractDict; kwargs...)
+    conn_str = string(get(info, "connection", "+"))
+    op = _resolve_connection(conn_str)
+    return _reconstruct_container(layers -> Parallel(op, layers...), info; kwargs...)
 end
 
-function _reconstruct_layer(::Val{:WrappedFunction}, info::AbstractDict; kwargs...)
+LuxZarr.reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> BranchLayer(layers...), info; kwargs...)
+
+function LuxZarr.reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict; kwargs...)
+    chs = Int(get(info, "chs", 1))
+    act = _resolve_activation(string(get(info, "activation", "identity")))
+    ϵ = Float32(get(info, "epsilon", 1.0e-5))
+    momentum = Float32(get(info, "momentum", 0.1))
+    affine = Bool(get(info, "affine", true))
+    track_stats = Bool(get(info, "track_stats", true))
+    return BatchNorm(chs, act; epsilon = ϵ, momentum = momentum, affine = affine, track_stats = track_stats)
+end
+
+function LuxZarr.reconstruct_layer(::Val{:WrappedFunction}, info::AbstractDict; kwargs...)
     func_str = string(get(info, "func", "identity"))
     fn = _resolve_activation(func_str)
     return WrappedFunction(fn)
 end
 
-function _reconstruct_layer(::Val{:Dropout}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:Dropout}, info::AbstractDict; kwargs...)
     p = Float32(get(info, "p", 0.5))
     dims_raw = get(info, "dims", ":")
     if dims_raw == ":" || isnothing(dims_raw) || isempty(dims_raw)
@@ -242,19 +326,20 @@ function _reconstruct_layer(::Val{:Dropout}, info::AbstractDict; kwargs...)
     end
 end
 
-function _reconstruct_layer(::Val{:NoOpLayer}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:NoOpLayer}, info::AbstractDict; kwargs...)
     return NoOpLayer()
 end
 
-function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; kwargs...)
     layer_info = get(info, "layers", get(info, "layer", nothing))
-    isnothing(layer_info) && return nothing
+    isnothing(layer_info) && throw(ArgumentError("SkipConnection layer metadata missing sub-layer info."))
     sub_l = reconstruct_model_from_info(layer_info; kwargs...)
-    isnothing(sub_l) && return nothing
-    return SkipConnection(sub_l, +)
+    conn_str = string(get(info, "connection", "+"))
+    op = _resolve_connection(conn_str)
+    return SkipConnection(sub_l, op)
 end
 
-function LuxZarr._setup_model_skeleton(model::Union{AbstractLuxLayer, NamedTuple}, root_g, ps, st, scalar_states, lazy::Bool = true)
+function LuxZarr._setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy::Bool = true)
     ps_skeleton, st_skeleton = if model isa NamedTuple
         nt_setups = map(m -> LuxCore.setup(default_rng(), m), model)
         (map(first, nt_setups), map(last, nt_setups))
