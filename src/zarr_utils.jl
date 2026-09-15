@@ -22,6 +22,8 @@ _open_root_group(store_or_path::Zarr.ZGroup) = store_or_path
 _open_root_group(store_or_path::AbstractString) = Zarr.zopen(String(store_or_path), "r")
 _open_root_group(store_or_path) = Zarr.zopen(store_or_path, "r")
 
+_join_zarr_path(prefix::AbstractString, rel_path::AbstractString) = isempty(rel_path) ? String(prefix) : string(prefix, '/', rel_path)
+
 function _get_zarr_node(root_g::Zarr.ZGroup, path::AbstractString)
     isempty(path) && return root_g
     curr = root_g
