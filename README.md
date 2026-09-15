@@ -61,7 +61,7 @@ ps_cpu = materialize(lazy_model.ps)
 
 ## Extending for Custom Layers
 
-To enable metadata extraction and standalone reconstruction for your custom Lux layer, define methods for `extract_model_info` and `_reconstruct_layer`:
+To enable metadata extraction and standalone reconstruction for your custom Lux layer, define methods for `extract_model_info` and `reconstruct_layer`:
 
 ```julia
 using Lux, LuxZarr
@@ -83,7 +83,7 @@ function LuxZarr.extract_model_info(layer::MyLinear)
 end
 
 # 2. Deserialization hook: reconstruct layer from metadata
-function LuxZarr._reconstruct_layer(::Val{:MyLinear}, info::AbstractDict; kwargs...)
+function LuxZarr.reconstruct_layer(::Val{:MyLinear}, info::AbstractDict; kwargs...)
     act = get(info, "activation", "identity") == "relu" ? Lux.relu : identity
     return MyLinear(Int(info["in_dims"]), Int(info["out_dims"]), act)
 end
