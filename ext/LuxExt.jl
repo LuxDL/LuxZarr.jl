@@ -164,103 +164,51 @@ _get_layer_list(layers::NamedTuple) = values(layers)
 _get_layer_list(layers::Union{Tuple, AbstractVector}) = layers
 _get_layer_list(layers) = (layers,)
 
+function _normalize_identifier(s::AbstractString)
+    str = strip(s)
+    str = chopsuffix(chopprefix(str, "typeof("), ")")
+    str = chopprefix(str, "Base.:")
+    if contains(str, '.')
+        str = split(str, '.')[end]
+    end
+    return str
+end
+
 const _ACTIVATION_MAP = Dict{String, Function}(
-    "identity" => identity,
-    "typeof(identity)" => identity,
-    "relu" => Lux.NNlib.relu,
-    "typeof(relu)" => Lux.NNlib.relu,
-    "NNlib.relu" => Lux.NNlib.relu,
-    "sigmoid" => Lux.NNlib.sigmoid_fast,
-    "typeof(sigmoid)" => Lux.NNlib.sigmoid_fast,
-    "sigmoid_fast" => Lux.NNlib.sigmoid_fast,
-    "typeof(sigmoid_fast)" => Lux.NNlib.sigmoid_fast,
-    "NNlib.sigmoid_fast" => Lux.NNlib.sigmoid_fast,
-    "σ" => Lux.NNlib.sigmoid_fast,
-    "typeof(σ)" => Lux.NNlib.sigmoid_fast,
-    "NNlib.σ" => Lux.NNlib.sigmoid_fast,
-    "tanh" => Lux.NNlib.tanh_fast,
-    "typeof(tanh)" => Lux.NNlib.tanh_fast,
-    "tanh_fast" => Lux.NNlib.tanh_fast,
-    "typeof(tanh_fast)" => Lux.NNlib.tanh_fast,
-    "NNlib.tanh_fast" => Lux.NNlib.tanh_fast,
-    "gelu" => Lux.NNlib.gelu,
-    "typeof(gelu)" => Lux.NNlib.gelu,
-    "NNlib.gelu" => Lux.NNlib.gelu,
-    "gelu_tanh" => Lux.NNlib.gelu,
-    "typeof(gelu_tanh)" => Lux.NNlib.gelu,
-    "NNlib.gelu_tanh" => Lux.NNlib.gelu,
+    "identity"      => identity,
+    "sigmoid"       => Lux.NNlib.sigmoid_fast,
+    "σ"             => Lux.NNlib.sigmoid_fast,
+    "silu"          => Lux.NNlib.swish,
+    "tanh"          => Lux.NNlib.tanh_fast,
+    "gelu_tanh"     => Lux.NNlib.gelu,
     "gelu_accurate" => Lux.NNlib.gelu,
-    "typeof(gelu_accurate)" => Lux.NNlib.gelu,
-    "NNlib.gelu_accurate" => Lux.NNlib.gelu,
-    "leakyrelu" => Lux.NNlib.leakyrelu,
-    "typeof(leakyrelu)" => Lux.NNlib.leakyrelu,
-    "NNlib.leakyrelu" => Lux.NNlib.leakyrelu,
-    "swish" => Lux.NNlib.swish,
-    "typeof(swish)" => Lux.NNlib.swish,
-    "NNlib.swish" => Lux.NNlib.swish,
-    "silu" => Lux.NNlib.swish,
-    "typeof(silu)" => Lux.NNlib.swish,
-    "NNlib.silu" => Lux.NNlib.swish,
-    "softplus" => Lux.NNlib.softplus,
-    "typeof(softplus)" => Lux.NNlib.softplus,
-    "NNlib.softplus" => Lux.NNlib.softplus,
-    "softsign" => Lux.NNlib.softsign,
-    "typeof(softsign)" => Lux.NNlib.softsign,
-    "NNlib.softsign" => Lux.NNlib.softsign,
-    "celu" => Lux.NNlib.celu,
-    "typeof(celu)" => Lux.NNlib.celu,
-    "NNlib.celu" => Lux.NNlib.celu,
-    "elu" => Lux.NNlib.elu,
-    "typeof(elu)" => Lux.NNlib.elu,
-    "NNlib.elu" => Lux.NNlib.elu,
-    "mish" => Lux.NNlib.mish,
-    "typeof(mish)" => Lux.NNlib.mish,
-    "NNlib.mish" => Lux.NNlib.mish,
-    "selu" => Lux.NNlib.selu,
-    "typeof(selu)" => Lux.NNlib.selu,
-    "NNlib.selu" => Lux.NNlib.selu,
-    "lisht" => Lux.NNlib.lisht,
-    "typeof(lisht)" => Lux.NNlib.lisht,
-    "NNlib.lisht" => Lux.NNlib.lisht,
-    "logsigmoid" => Lux.NNlib.logsigmoid,
-    "typeof(logsigmoid)" => Lux.NNlib.logsigmoid,
-    "NNlib.logsigmoid" => Lux.NNlib.logsigmoid,
-    "tanhshrink" => Lux.NNlib.tanhshrink,
-    "typeof(tanhshrink)" => Lux.NNlib.tanhshrink,
-    "NNlib.tanhshrink" => Lux.NNlib.tanhshrink,
-    "hardsigmoid" => Lux.NNlib.hardsigmoid,
-    "typeof(hardsigmoid)" => Lux.NNlib.hardsigmoid,
-    "NNlib.hardsigmoid" => Lux.NNlib.hardsigmoid,
-    "hardswish" => Lux.NNlib.hardswish,
-    "typeof(hardswish)" => Lux.NNlib.hardswish,
-    "NNlib.hardswish" => Lux.NNlib.hardswish,
+    [string(nameof(f)) => f for f in (
+        Lux.NNlib.relu, Lux.NNlib.sigmoid_fast, Lux.NNlib.tanh_fast,
+        Lux.NNlib.gelu, Lux.NNlib.leakyrelu, Lux.NNlib.swish,
+        Lux.NNlib.softplus, Lux.NNlib.softsign, Lux.NNlib.celu,
+        Lux.NNlib.elu, Lux.NNlib.mish, Lux.NNlib.selu,
+        Lux.NNlib.lisht, Lux.NNlib.logsigmoid, Lux.NNlib.tanhshrink,
+        Lux.NNlib.hardsigmoid, Lux.NNlib.hardswish,
+    )]...,
 )
 
 const _CONNECTION_MAP = Dict{String, Function}(
-    "+" => +,
-    "typeof(+)" => +,
-    "Base.:+" => +,
-    "-" => -,
-    "typeof(-)" => -,
-    "Base.:-" => -,
-    "*" => *,
-    "typeof(*)" => *,
-    "Base.:*" => *,
+    "+"    => +,
+    "-"    => -,
+    "*"    => *,
     "vcat" => vcat,
-    "typeof(vcat)" => vcat,
-    "Base.vcat" => vcat,
     "hcat" => hcat,
-    "typeof(hcat)" => hcat,
-    "Base.hcat" => hcat,
 )
 
 function _resolve_activation(act_str::AbstractString)
-    haskey(_ACTIVATION_MAP, act_str) && return _ACTIVATION_MAP[act_str]
+    key = _normalize_identifier(act_str)
+    haskey(_ACTIVATION_MAP, key) && return _ACTIVATION_MAP[key]
     throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized activation function '$(act_str)'."))
 end
 
 function _resolve_connection(conn_str::AbstractString)
-    haskey(_CONNECTION_MAP, conn_str) && return _CONNECTION_MAP[conn_str]
+    key = _normalize_identifier(conn_str)
+    haskey(_CONNECTION_MAP, key) && return _CONNECTION_MAP[key]
     throw(ArgumentError("Cannot faithfully reconstruct model: unrecognized connection function '$(conn_str)'."))
 end
 
