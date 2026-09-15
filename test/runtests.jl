@@ -309,4 +309,79 @@ using Zarr
         @test LuxZarr._compute_chunks((2, 2), arr) == (2, 2)
         @test LuxZarr._compute_chunks((10, 10), arr) == (4, 8)
     end
+
+    @testset "WrappedFunction, Dropout, and NoOpLayer Serialization" begin
+        model = Chain(
+            Dense(4 => 4),
+            WrappedFunction(relu),
+            Dropout(0.2f0),
+            NoOpLayer(),
+            Dense(4 => 2)
+        )
+        ps, st = Lux.setup(rng, model)
+        x = randn(rng, Float32, 4, 3)
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "special_layers.zarr")
+            save_model(save_path, ps, st; model = model)
+
+            lazy_model = load_model(save_path)
+            @test lazy_model isa LazyLuxModel
+            @test lazy_model.model isa Chain
+            @test lazy_model.model.layers[2] isa WrappedFunction
+            @test lazy_model.model.layers[3] isa Dropout
+            @test lazy_model.model.layers[4] isa NoOpLayer
+        end
+    end
+
+    @testset "NamedTuple of Models" begin
+        models = (
+            encoder = Chain(Dense(4 => 8, relu), Dense(8 => 2)),
+            decoder = Chain(Dense(2 => 8, relu), Dense(8 => 4)),
+        )
+        ps_enc, st_enc = Lux.setup(rng, models.encoder)
+        ps_dec, st_dec = Lux.setup(rng, models.decoder)
+        ps = (encoder = ps_enc, decoder = ps_dec)
+        st = (encoder = st_enc, decoder = st_dec)
+
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "nt_models.zarr")
+            save_model(save_path, ps, st; model = models)
+
+            # Standalone load
+            lazy_nt = load_model(save_path)
+            @test lazy_nt isa LazyLuxModel
+            @test keys(lazy_nt.model) === (:encoder, :decoder)
+            @test lazy_nt.model.encoder isa Chain
+            @test lazy_nt.model.decoder isa Chain
+            @test lazy_nt.ps.encoder.layer_1.weight == ps.encoder.layer_1.weight
+            @test lazy_nt.ps.decoder.layer_1.weight == ps.decoder.layer_1.weight
+
+            # Guided load with model NamedTuple
+            lazy_guided = load_model(save_path, models)
+            @test lazy_guided isa LazyLuxModel
+            @test keys(lazy_guided.model) === (:encoder, :decoder)
+        end
+    end
+
+    @testset "kwargs in load_model and custom reconstruction" begin
+        struct CustomLayer <: LuxCore.AbstractLuxLayer end
+        LuxZarr.extract_model_info(::CustomLayer) = Dict{String, Any}("type" => "CustomLayer")
+        LuxZarr._reconstruct_layer(::Val{:CustomLayer}, info::AbstractDict; custom_opt = false, kwargs...) = custom_opt ? CustomLayer() : nothing
+
+        model = CustomLayer()
+        ps, st = NamedTuple(), NamedTuple()
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "custom_layer.zarr")
+            save_model(save_path, ps, st; model = model)
+
+            # Without kwargs, custom_opt defaults to false -> returns nothing / ps, st
+            ps_loaded, st_loaded = load_model(save_path)
+            @test !(ps_loaded isa LazyLuxModel)
+
+            # With custom_opt=true forwarded via kwargs...
+            lazy_loaded = load_model(save_path; custom_opt = true)
+            @test lazy_loaded isa LazyLuxModel
+            @test lazy_loaded.model isa CustomLayer
+        end
+    end
 end

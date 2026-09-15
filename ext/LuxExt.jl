@@ -18,12 +18,17 @@ LuxZarr._get_lux_version(::AbstractLuxLayer) = string(pkgversion(Lux))
 
 function LuxZarr.load_model(
         store_or_path,
-        model::AbstractLuxLayer;
+        model::Union{AbstractLuxLayer, NamedTuple};
         lazy::Bool = true,
         rng = default_rng(),
         kwargs...,
     )
-    ps, st = Lux.setup(rng, model)
+    ps, st = if model isa NamedTuple
+        nt_setups = map(m -> Lux.setup(rng, m), model)
+        (map(first, nt_setups), map(last, nt_setups))
+    else
+        Lux.setup(rng, model)
+    end
     ps_loaded, st_loaded = LuxZarr.load_model(store_or_path, ps, st; lazy = lazy, kwargs...)
     if lazy
         return LazyLuxModel(model, ps_loaded, st_loaded)
@@ -124,7 +129,10 @@ function LuxZarr.extract_model_info(model::Lux.NoOpLayer)
 end
 
 function LuxZarr.extract_model_info(nns::NamedTuple)
-    d = Dict{String, Any}("__is_namedtuple__" => true)
+    d = Dict{String, Any}(
+        "__is_namedtuple__" => true,
+        "__keys__" => [string(k) for k in keys(nns)],
+    )
     for (k, v) in pairs(nns)
         d[string(k)] = extract_model_info(v)
     end
@@ -234,8 +242,13 @@ function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; kwargs..
     return SkipConnection(sub_l, +)
 end
 
-function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states, lazy::Bool = true)
-    ps_skeleton, st_skeleton = LuxCore.setup(default_rng(), model)
+function LuxZarr._setup_model_skeleton(model::Union{AbstractLuxLayer, NamedTuple}, root_g, ps, st, scalar_states, lazy::Bool = true)
+    ps_skeleton, st_skeleton = if model isa NamedTuple
+        nt_setups = map(m -> LuxCore.setup(default_rng(), m), model)
+        (map(first, nt_setups), map(last, nt_setups))
+    else
+        LuxCore.setup(default_rng(), model)
+    end
     attrs = Dict{String, Any}(root_g.attrs)
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     ps_loaded = isempty(ps) ? ps_skeleton : _guided_load_tree(root_g, ps_skeleton, "parameters", scalar_params, lazy)
