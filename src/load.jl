@@ -91,7 +91,7 @@ function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dic
     return Functors.fmap_with_path(tree; exclude = _isleaf) do kp, x
         rel_path = _keypath_to_path(kp)
         if x isa AbstractArray
-            full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
+            full_path = _join_zarr_path(prefix, rel_path)
             z_node = _get_zarr_node(root_g, full_path)
             if z_node isa Zarr.ZArray
                 return lazy ? z_node : adapt(typeof(x), convert(AbstractArray{eltype(x)}, Array(z_node)))
@@ -108,7 +108,7 @@ function _load_tree_entries(root_g::Zarr.ZGroup, prefix::String, raw_keypaths, s
     for raw_kp in raw_keypaths
         kp = _deserialize_keypath(raw_kp)
         rel_path = _keypath_to_path(kp)
-        full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)
+        full_path = _join_zarr_path(prefix, rel_path)
         z_node = _get_zarr_node(root_g, full_path)
         if z_node isa Zarr.ZArray
             push!(entries, kp => lazy ? z_node : Array(z_node))
