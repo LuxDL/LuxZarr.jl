@@ -46,16 +46,18 @@ Base.getindex(x::AbstractLazyTree, i) = getindex(getfield(x, :data), i)
 Base.length(x::AbstractLazyTree) = length(getfield(x, :data))
 Base.iterate(x::AbstractLazyTree, state...) = iterate(getfield(x, :data), state...)
 
-# Functors integration
+# Functors and MLDataDevices integration
 Functors.children(x::AbstractLazyTree) = (data = getfield(x, :data),)
 Functors.children(x::LazyLuxModel) = (model = getfield(x, :model), ps = getfield(x, :ps), st = getfield(x, :st))
 
-# Adapt integration for device transfers
-Adapt.adapt_storage(to::MLDataDevices.CPUDevice, arr::Zarr.ZArray) = adapt(to, Array(arr))
-Adapt.adapt_storage(to::MLDataDevices.AbstractDevice, arr::Zarr.ZArray) = adapt(to, Array(arr))
-Adapt.adapt_storage(::Type{<:Array}, arr::Zarr.ZArray) = Array(arr)
+MLDataDevices.isleaf(::AbstractLazyTree) = true
+MLDataDevices.isleaf(::LazyLuxModel) = true
 
-Adapt.adapt_structure(to, x::T) where {T <: AbstractLazyTree} = T(adapt(to, getfield(x, :data)))
+_wrap_tree(::LazyParameters, data) = LazyParameters(data)
+_wrap_tree(::LazyState, data) = LazyState(data)
+
+# Adapt integration for device transfers
+Adapt.adapt_structure(to, x::AbstractLazyTree) = _wrap_tree(x, adapt(to, materialize(x)))
 Adapt.adapt_structure(to, x::LazyLuxModel) = LazyLuxModel(getfield(x, :model), adapt(to, getfield(x, :ps)), adapt(to, getfield(x, :st)))
 
 # Iteration & indexing for LazyLuxModel: (ps, st, model) = lazy_model
@@ -63,19 +65,25 @@ Base.iterate(x::LazyLuxModel, state = 1) = state <= 3 ? (getfield(x, state), sta
 Base.length(::LazyLuxModel) = 3
 Base.getindex(x::LazyLuxModel, i::Int) = 1 <= i <= 3 ? getfield(x, i) : throw(BoundsError(x, i))
 
-# Base.materialize implementations
-Base.materialize(arr::Zarr.ZArray) = Array(arr)
-Base.materialize(x::AbstractLazyTree) = Functors.fmap(Base.materialize, unwrap(x))
-Base.materialize(lm::LazyLuxModel) = LazyLuxModel(lm.model, Base.materialize(lm.ps), Base.materialize(lm.st))
-
 """
-    materialize(x; device=cpu_device())
+    materialize(x; device=nothing)
     materialize(device, x)
 
-Materialize lazy arrays in `x` into concrete in-memory or device-resident arrays.
+Materialize lazy Zarr arrays in `x` into concrete in-memory or device-resident arrays.
 """
-materialize(arr::Zarr.ZArray; device = cpu_device()) = device(Array(arr))
-materialize(x::AbstractLazyTree; device = cpu_device()) = device(Base.materialize(x))
-materialize(lm::LazyLuxModel; device = cpu_device()) = LazyLuxModel(lm.model, materialize(lm.ps; device = device), materialize(lm.st; device = device))
+function materialize end
+
+_to_array(arr::Zarr.ZArray) = Array(arr)
+_to_array(x) = x
+
+_materialize_impl(arr::Zarr.ZArray) = Array(arr)
+_materialize_impl(x::AbstractLazyTree) = Functors.fmap(_to_array, unwrap(x); exclude = _isleaf)
+_materialize_impl(lm::LazyLuxModel) = LazyLuxModel(lm.model, _materialize_impl(lm.ps), _materialize_impl(lm.st))
+_materialize_impl(x) = Functors.fmap(_to_array, x; exclude = _isleaf)
+
+function materialize(x; device = nothing)
+    m = _materialize_impl(x)
+    return isnothing(device) ? m : device(m)
+end
+
 materialize(dev::MLDataDevices.AbstractDevice, x) = materialize(x; device = dev)
-materialize(x; device = cpu_device()) = device(Base.materialize(x))
