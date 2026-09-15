@@ -3,6 +3,7 @@
 [![][ci-img]][ci-url]
 [![][codecov-img]][codecov-url]
 [![][julia-img]][julia-url]
+[![][code-style-img]][code-style-url]
 [![][license-img]][license-url]
 
 Portable, chunked, and lazy [Zarr v3](https://zarr.dev/)-backed serialization for [Lux.jl](https://lux.csail.mit.edu/stable/) neural networks in Julia.
@@ -109,3 +110,6 @@ MIT License.
 
 [license-img]: https://img.shields.io/badge/license-MIT-blue.svg?style=round-square
 [license-url]: https://github.com/LuxDL/LuxZarr.jl/blob/main/LICENSE
+
+[code-style-img]: https://img.shields.io/badge/code_style-%E1%9A%B1%E1%9A%A2%E1%9A%BE%E1%9B%81%E1%9A%B2-black
+[code-style-url]: https://github.com/fredrikekre/Runic.jl

@@ -175,27 +175,29 @@ function _normalize_identifier(s::AbstractString)
 end
 
 const _ACTIVATION_MAP = Dict{String, Function}(
-    "identity"      => identity,
-    "sigmoid"       => Lux.NNlib.sigmoid_fast,
-    "σ"             => Lux.NNlib.sigmoid_fast,
-    "silu"          => Lux.NNlib.swish,
-    "tanh"          => Lux.NNlib.tanh_fast,
-    "gelu_tanh"     => Lux.NNlib.gelu,
+    "identity" => identity,
+    "sigmoid" => Lux.NNlib.sigmoid_fast,
+    "σ" => Lux.NNlib.sigmoid_fast,
+    "silu" => Lux.NNlib.swish,
+    "tanh" => Lux.NNlib.tanh_fast,
+    "gelu_tanh" => Lux.NNlib.gelu,
     "gelu_accurate" => Lux.NNlib.gelu,
-    [string(nameof(f)) => f for f in (
-        Lux.NNlib.relu, Lux.NNlib.sigmoid_fast, Lux.NNlib.tanh_fast,
-        Lux.NNlib.gelu, Lux.NNlib.leakyrelu, Lux.NNlib.swish,
-        Lux.NNlib.softplus, Lux.NNlib.softsign, Lux.NNlib.celu,
-        Lux.NNlib.elu, Lux.NNlib.mish, Lux.NNlib.selu,
-        Lux.NNlib.lisht, Lux.NNlib.logsigmoid, Lux.NNlib.tanhshrink,
-        Lux.NNlib.hardsigmoid, Lux.NNlib.hardswish,
-    )]...,
+    [
+        string(nameof(f)) => f for f in (
+                Lux.NNlib.relu, Lux.NNlib.sigmoid_fast, Lux.NNlib.tanh_fast,
+                Lux.NNlib.gelu, Lux.NNlib.leakyrelu, Lux.NNlib.swish,
+                Lux.NNlib.softplus, Lux.NNlib.softsign, Lux.NNlib.celu,
+                Lux.NNlib.elu, Lux.NNlib.mish, Lux.NNlib.selu,
+                Lux.NNlib.lisht, Lux.NNlib.logsigmoid, Lux.NNlib.tanhshrink,
+                Lux.NNlib.hardsigmoid, Lux.NNlib.hardswish,
+            )
+    ]...,
 )
 
 const _CONNECTION_MAP = Dict{String, Function}(
-    "+"    => +,
-    "-"    => -,
-    "*"    => *,
+    "+" => +,
+    "-" => -,
+    "*" => *,
     "vcat" => vcat,
     "hcat" => hcat,
 )
