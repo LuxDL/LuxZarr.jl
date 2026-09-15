@@ -471,4 +471,49 @@ using Zarr
             @test lazy_loaded.model isa CustomLayer
         end
     end
+
+    @testset "resolve_activation, resolve_connection, and Custom Layer Hook" begin
+        @test resolve_activation("relu") === Lux.NNlib.relu
+        @test resolve_activation("identity") === identity
+        @test resolve_activation("tanh") === Lux.NNlib.tanh_fast
+        @test_throws ArgumentError resolve_activation("unsupported_activation_xyz")
+
+        @test resolve_connection("+") === +
+        @test resolve_connection("*") === *
+        @test resolve_connection("vcat") === vcat
+        @test_throws ArgumentError resolve_connection("unsupported_connection_xyz")
+
+        struct MyLinearLayer{F} <: LuxCore.AbstractLuxLayer
+            in_dims::Int
+            out_dims::Int
+            activation::F
+        end
+        Lux.initialparameters(rng::Random.AbstractRNG, l::MyLinearLayer) = (weight = randn(rng, Float32, l.out_dims, l.in_dims),)
+        Lux.initialstates(::Random.AbstractRNG, ::MyLinearLayer) = NamedTuple()
+        (l::MyLinearLayer)(x, ps, st) = (l.activation.(ps.weight * x), st)
+
+        LuxZarr.extract_model_info(l::MyLinearLayer) = Dict{String, Any}(
+            "type" => "MyLinearLayer",
+            "in_dims" => l.in_dims,
+            "out_dims" => l.out_dims,
+            "activation" => string(l.activation),
+        )
+        function LuxZarr.reconstruct_layer(::Val{:MyLinearLayer}, info::AbstractDict; kwargs...)
+            act = resolve_activation(info["activation"])
+            return MyLinearLayer(Int(info["in_dims"]), Int(info["out_dims"]), act)
+        end
+
+        custom_m = MyLinearLayer(5, 3, relu)
+        ps_c, st_c = Lux.setup(rng, custom_m)
+        mktempdir() do tmp_dir
+            save_path = joinpath(tmp_dir, "mylinear.zarr")
+            save_model(save_path, ps_c, st_c; model = custom_m)
+
+            lazy_custom = load_model(save_path)
+            @test lazy_custom isa LazyLuxModel
+            @test lazy_custom.model.in_dims == 5
+            @test lazy_custom.model.out_dims == 3
+            @test lazy_custom.model.activation === Lux.NNlib.relu
+        end
+    end
 end

@@ -90,7 +90,7 @@ end
 
 # 2. Deserialization hook: reconstruct layer from metadata
 function LuxZarr.reconstruct_layer(::Val{:MyLinear}, info::AbstractDict; kwargs...)
-    act = get(info, "activation", "identity") == "relu" ? Lux.relu : identity
+    act = resolve_activation(info["activation"])
     return MyLinear(Int(info["in_dims"]), Int(info["out_dims"]), act)
 end
 ```

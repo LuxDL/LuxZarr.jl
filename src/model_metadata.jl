@@ -44,6 +44,24 @@ function reconstruct_layer(::Val{T}, info::AbstractDict; kwargs...) where {T}
     throw(ArgumentError("Cannot faithfully reconstruct layer of type '$(T)'. Define `LuxZarr.reconstruct_layer(::Val{:$T}, info)` or load into a pre-constructed model via `load_model(path, model)`."))
 end
 
+"""
+    resolve_activation(act_str::AbstractString) -> Function
+
+Resolve a string representation of an activation function (e.g., `"relu"`, `"tanh"`, `"identity"`)
+to its corresponding function. Throws an `ArgumentError` if the activation is unrecognized or unsupported.
+Requires `Lux` extension to be loaded for standard neural network activations, or custom dispatch definitions.
+"""
+function resolve_activation end
+
+"""
+    resolve_connection(conn_str::AbstractString) -> Function
+
+Resolve a string representation of a container connection function (e.g., `"+"`, `"*"`, `"vcat"`)
+to its corresponding function. Throws an `ArgumentError` if the connection is unrecognized or unsupported.
+Requires `Lux` extension to be loaded for standard container connections, or custom dispatch definitions.
+"""
+function resolve_connection end
+
 _get_model_summary(::Nothing) = nothing
 function _get_model_summary(model)
     try
