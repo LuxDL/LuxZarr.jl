@@ -36,13 +36,13 @@ _wrap_lazy(x, ::Type{T}, lazy::Bool) where {T} = lazy ? T(x) : x
 
 # Mode 1: Guided load with (ps, st)
 function load_model(
-    store_or_path,
-    ps,
-    st=NamedTuple();
-    lazy::Bool=true,
-    metadata_only::Bool=false,
-    kwargs...,
-)
+        store_or_path,
+        ps,
+        st = NamedTuple();
+        lazy::Bool = true,
+        metadata_only::Bool = false,
+        kwargs...,
+    )
     root_g = _open_root_group(store_or_path)
     attrs = Dict{String, Any}(root_g.attrs)
     metadata_only && return attrs
@@ -50,19 +50,22 @@ function load_model(
     scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
     scalar_states = get(attrs, "scalar_states", Dict{String, Any}())
 
-    ps_loaded = _guided_load_tree(root_g, unwrap(ps), "parameters", scalar_params, lazy)
-    st_loaded = _guided_load_tree(root_g, unwrap(st), "states", scalar_states, lazy)
+    ps_unwrapped = _unwrap_tree_containers(unwrap(ps))
+    st_unwrapped = _unwrap_tree_containers(unwrap(st))
+
+    ps_loaded = _guided_load_tree(root_g, ps_unwrapped, "parameters", scalar_params, lazy)
+    st_loaded = _guided_load_tree(root_g, st_unwrapped, "states", scalar_states, lazy)
 
     return (_wrap_lazy(ps_loaded, LazyParameters, lazy), _wrap_lazy(st_loaded, LazyState, lazy))
 end
 
 # Mode 2: Standalone load without model or ps/st
 function load_model(
-    store_or_path;
-    lazy::Bool=true,
-    metadata_only::Bool=false,
-    kwargs...,
-)
+        store_or_path;
+        lazy::Bool = true,
+        metadata_only::Bool = false,
+        kwargs...,
+    )
     root_g = _open_root_group(store_or_path)
     attrs = Dict{String, Any}(root_g.attrs)
     metadata_only && return attrs
@@ -74,7 +77,7 @@ function load_model(
 
     ps = _reconstruct_from_keypaths(_load_tree_entries(root_g, "parameters", param_keypaths, scalar_params, lazy))
     st = _reconstruct_from_keypaths(_load_tree_entries(root_g, "states", state_keypaths, scalar_states, lazy))
-    model = reconstruct_model_from_info(get(attrs, "model_info", nothing))
+    model = reconstruct_model_from_info(get(attrs, "model_info", nothing); kwargs...)
 
     if model !== nothing && isdefined(LuxZarr, :_setup_model_skeleton)
         ps, st = _setup_model_skeleton(model, root_g, ps, st, scalar_states, lazy)
@@ -85,7 +88,7 @@ function load_model(
 end
 
 function _guided_load_tree(root_g::Zarr.ZGroup, tree, prefix::String, scalar_dict::AbstractDict, lazy::Bool)
-    return Functors.fmap_with_path(tree; exclude=_isleaf) do kp, x
+    return Functors.fmap_with_path(tree; exclude = _isleaf) do kp, x
         rel_path = _keypath_to_path(kp)
         if x isa AbstractArray
             full_path = isempty(rel_path) ? prefix : string(prefix, '/', rel_path)

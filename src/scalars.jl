@@ -12,7 +12,7 @@ _deserialize_scalar(val::AbstractDict, ::Type) = _deserialize_typed_dict(get(val
 _deserialize_scalar(val::AbstractString, ::Type{Symbol}) = startswith(val, ':') ? Symbol(SubString(val, 2)) : Symbol(val)
 _deserialize_scalar(val::AbstractString, ::Type{Val}) = startswith(val, "Val{") ? (occursin("true", lowercase(val)) ? Val(true) : Val(false)) : Val(val)
 _deserialize_scalar(val::AbstractString, ::Type{<:Val{B}}) where {B} = Val(B)
-_deserialize_scalar(val::Number, ::Type{T}) where {T<:Number} = T(val)
+_deserialize_scalar(val::Number, ::Type{T}) where {T <: Number} = T(val)
 
 function _deserialize_scalar(val::AbstractString, ::Type{Any})
     if startswith(val, ':')
@@ -24,4 +24,3 @@ function _deserialize_scalar(val::AbstractString, ::Type{Any})
 end
 
 _deserialize_scalar(val, ::Type) = val
-

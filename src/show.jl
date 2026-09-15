@@ -1,8 +1,8 @@
 function _format_bytes(bytes::Real)
     bytes < 1024 && return "$(round(Int, bytes)) B"
-    bytes < 1024^2 && return "$(round(bytes / 1024, digits=1)) KB"
-    bytes < 1024^3 && return "$(round(bytes / 1024^2, digits=1)) MB"
-    return "$(round(bytes / 1024^3, digits=2)) GB"
+    bytes < 1024^2 && return "$(round(bytes / 1024, digits = 1)) KB"
+    bytes < 1024^3 && return "$(round(bytes / 1024^2, digits = 1)) MB"
+    return "$(round(bytes / 1024^3, digits = 2)) GB"
 end
 
 _format_count(n::Integer) = reverse(join([join(reverse(chunk)) for chunk in Iterators.partition(reverse(string(n)), 3)], ","))
@@ -43,7 +43,7 @@ function _print_tree_node(io::IO, name::String, val, prefix::String, is_last::Bo
     branch = is_last ? "└── " : "├── "
     next_prefix = prefix * (is_last ? "    " : "│   ")
 
-    if val isa NamedTuple || val isa AbstractDict || (val isa Tuple && !isempty(val) && first(val) isa Union{NamedTuple, AbstractDict, Tuple})
+    return if val isa NamedTuple || val isa AbstractDict || (val isa Tuple && !isempty(val) && first(val) isa Union{NamedTuple, AbstractDict, Tuple})
         println(io, prefix, branch, name)
         entries = _to_entries(val)
         for (i, (k, v)) in enumerate(entries)
@@ -57,7 +57,7 @@ function _print_tree_node(io::IO, name::String, val, prefix::String, is_last::Bo
     end
 end
 
-function _show_tree(io::IO, data; title::String="", unit::String="parameters", status_suffix::String="")
+function _show_tree(io::IO, data; title::String = "", unit::String = "parameters", status_suffix::String = "")
     stats = _collect_tree_stats(data)
     is_all_lazy = stats.num_in_memory == 0 && stats.num_lazy > 0
 
@@ -77,7 +77,7 @@ function _show_tree(io::IO, data; title::String="", unit::String="parameters", s
         _print_tree_node(io, string(k), v, "", i == length(entries), is_all_lazy)
     end
 
-    if stats.total_params > 0
+    return if stats.total_params > 0
         println(io, "─"^45)
         suffix = isempty(status_suffix) ? "" : " | " * (is_all_lazy ? "All on-disk" : status_suffix)
         print(io, "$(_format_count(stats.total_params)) $unit ($(_format_bytes(stats.total_bytes)))", suffix)
@@ -85,11 +85,11 @@ function _show_tree(io::IO, data; title::String="", unit::String="parameters", s
 end
 
 Base.show(io::IO, ::MIME"text/plain", lp::LazyParameters) = _show_tree(io, unwrap(lp))
-Base.show(io::IO, ::MIME"text/plain", ls::LazyState) = _show_tree(io, unwrap(ls); title="LazyState:", unit="state elements")
+Base.show(io::IO, ::MIME"text/plain", ls::LazyState) = _show_tree(io, unwrap(ls); title = "LazyState:", unit = "state elements")
 function Base.show(io::IO, ::MIME"text/plain", lm::LazyLuxModel)
     stats = _collect_tree_stats(unwrap(lm.ps))
     status = "$(_format_count(stats.num_lazy)) on-disk / $(_format_count(stats.num_in_memory)) in-memory"
-    _show_tree(io, unwrap(lm.ps); title="LazyLuxModel ($(nameof(typeof(lm.model)))):", status_suffix=status)
+    return _show_tree(io, unwrap(lm.ps); title = "LazyLuxModel ($(nameof(typeof(lm.model)))):", status_suffix = status)
 end
 
 Base.show(io::IO, lp::LazyParameters) = print(io, "LazyParameters(", length(keys(lp)), " entries)")

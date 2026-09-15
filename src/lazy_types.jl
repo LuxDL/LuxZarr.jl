@@ -59,7 +59,7 @@ Adapt.adapt_structure(to, x::T) where {T <: AbstractLazyTree} = T(adapt(to, getf
 Adapt.adapt_structure(to, x::LazyLuxModel) = LazyLuxModel(getfield(x, :model), adapt(to, getfield(x, :ps)), adapt(to, getfield(x, :st)))
 
 # Iteration & indexing for LazyLuxModel: (ps, st, model) = lazy_model
-Base.iterate(x::LazyLuxModel, state=1) = state <= 3 ? (getfield(x, state), state + 1) : nothing
+Base.iterate(x::LazyLuxModel, state = 1) = state <= 3 ? (getfield(x, state), state + 1) : nothing
 Base.length(::LazyLuxModel) = 3
 Base.getindex(x::LazyLuxModel, i::Int) = 1 <= i <= 3 ? getfield(x, i) : throw(BoundsError(x, i))
 
@@ -74,8 +74,8 @@ Base.materialize(lm::LazyLuxModel) = LazyLuxModel(lm.model, Base.materialize(lm.
 
 Materialize lazy arrays in `x` into concrete in-memory or device-resident arrays.
 """
-materialize(arr::Zarr.ZArray; device=cpu_device()) = device(Array(arr))
-materialize(x::AbstractLazyTree; device=cpu_device()) = device(Base.materialize(x))
-materialize(lm::LazyLuxModel; device=cpu_device()) = LazyLuxModel(lm.model, materialize(lm.ps; device=device), materialize(lm.st; device=device))
-materialize(dev::MLDataDevices.AbstractDevice, x) = materialize(x; device=dev)
-materialize(x; device=cpu_device()) = device(Base.materialize(x))
+materialize(arr::Zarr.ZArray; device = cpu_device()) = device(Array(arr))
+materialize(x::AbstractLazyTree; device = cpu_device()) = device(Base.materialize(x))
+materialize(lm::LazyLuxModel; device = cpu_device()) = LazyLuxModel(lm.model, materialize(lm.ps; device = device), materialize(lm.st; device = device))
+materialize(dev::MLDataDevices.AbstractDevice, x) = materialize(x; device = dev)
+materialize(x; device = cpu_device()) = device(Base.materialize(x))

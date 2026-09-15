@@ -22,7 +22,7 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "pure_tree.zarr")
-            save_model(save_path, ps, st; metadata=Dict("custom_tag" => "pure_tree"))
+            save_model(save_path, ps, st; metadata = Dict("custom_tag" => "pure_tree"))
 
             # Standalone lazy loading (default)
             ps_loaded, st_loaded = load_model(save_path)
@@ -37,13 +37,13 @@ using Zarr
             @test st_loaded.mode == :eval
 
             # Eager loading (lazy=false)
-            ps_eager, st_eager = load_model(save_path; lazy=false)
+            ps_eager, st_eager = load_model(save_path; lazy = false)
             @test ps_eager isa NamedTuple
             @test !(ps_eager isa LazyParameters)
             @test ps_eager.layer_1.weight == ps.layer_1.weight
 
             # Guided loading with ps, st
-            ps_guided, st_guided = load_model(save_path, ps, st; lazy=false)
+            ps_guided, st_guided = load_model(save_path, ps, st; lazy = false)
             @test ps_guided.layer_1.weight == ps.layer_1.weight
             @test st_guided.step == 100
         end
@@ -60,7 +60,7 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "dense_chain.zarr")
-            save_model(save_path, ps, st; model=model, metadata=Dict("tag" => "test_dense"))
+            save_model(save_path, ps, st; model = model, metadata = Dict("tag" => "test_dense"))
             @test isdir(save_path)
 
             # Standalone load returning LazyLuxModel
@@ -114,16 +114,18 @@ using Zarr
             @test sprint(show, lazy_model) == "LazyLuxModel(Chain)"
 
             # Mixed state display (modify one layer in-memory)
-            ps_mixed = LazyParameters((
-                layer_1 = (weight = lazy_model.ps.layer_1.weight, bias = lazy_model.ps.layer_1.bias),
-                layer_2 = (weight = Array(lazy_model.ps.layer_2.weight), bias = Array(lazy_model.ps.layer_2.bias)),
-            ))
+            ps_mixed = LazyParameters(
+                (
+                    layer_1 = (weight = lazy_model.ps.layer_1.weight, bias = lazy_model.ps.layer_1.bias),
+                    layer_2 = (weight = Array(lazy_model.ps.layer_2.weight), bias = Array(lazy_model.ps.layer_2.bias)),
+                )
+            )
             show_str_mixed = sprint(show, MIME("text/plain"), ps_mixed)
             @test occursin("on-disk /", show_str_mixed)
             @test occursin("[in-memory Array]", show_str_mixed) # Highlights only exceptions
 
             # Eager load (lazy=false)
-            ps_eager, st_eager, model_eager = load_model(save_path; lazy=false)
+            ps_eager, st_eager, model_eager = load_model(save_path; lazy = false)
             @test ps_eager isa NamedTuple
             @test !(ps_eager isa LazyParameters)
             y_eager, _ = model_eager(x, ps_eager, st_eager)
@@ -146,7 +148,7 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "batchnorm_model.zarr")
-            save_model(save_path, ps, st; model=model)
+            save_model(save_path, ps, st; model = model)
 
             # Lazy load with model
             lazy_model = load_model(save_path, model)
@@ -179,7 +181,7 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "complex_model.zarr")
-            save_model(save_path, ps, st; model=model_valid)
+            save_model(save_path, ps, st; model = model_valid)
 
             # Lazy load
             lazy_model = load_model(save_path, model_valid)
@@ -197,10 +199,10 @@ using Zarr
             save_model(save_path, ps, st)
 
             # Without force=true on existing directory should error
-            @test_throws ArgumentError save_model(save_path, ps, st; force=false)
+            @test_throws ArgumentError save_model(save_path, ps, st; force = false)
 
             # With force=true should succeed
-            save_model(save_path, ps, st; force=true)
+            save_model(save_path, ps, st; force = true)
             @test isdir(save_path)
         end
     end
@@ -212,7 +214,7 @@ using Zarr
         y, _ = model(x, ps, st)
 
         mem_store = isdefined(Zarr, :DictStore) ? Zarr.DictStore() : (isdefined(Zarr, :MemoryStore) ? Zarr.MemoryStore() : Dict{String, Vector{UInt8}}())
-        save_model(mem_store, ps, st; model=model)
+        save_model(mem_store, ps, st; model = model)
 
         lazy_model = load_model(mem_store, model)
         y_loaded, _ = lazy_model(x)
@@ -229,7 +231,7 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "conv_model.zarr")
-            save_model(save_path, ps, st; model=model)
+            save_model(save_path, ps, st; model = model)
 
             lazy_model = load_model(save_path)
             @test lazy_model isa LazyLuxModel
@@ -250,12 +252,12 @@ using Zarr
 
         mktempdir() do tmp_dir
             save_path = joinpath(tmp_dir, "custom_meta.zarr")
-            save_model(save_path, ps, st; model=model, metadata=custom_meta, chunks=(2, 2))
+            save_model(save_path, ps, st; model = model, metadata = custom_meta, chunks = (2, 2))
 
-            meta = load_model(save_path; metadata_only=true)
+            meta = load_model(save_path; metadata_only = true)
             @test meta["user_metadata"]["experiment"] == "lux_benchmark"
             @test meta["user_metadata"]["epoch"] == 42
-            @test isapprox(meta["user_metadata"]["loss"], 0.0012f0; atol=1e-5)
+            @test isapprox(meta["user_metadata"]["loss"], 0.0012f0; atol = 1.0e-5)
 
             lazy_model = load_model(save_path, model)
             @test lazy_model.ps.weight == ps.weight
@@ -271,7 +273,7 @@ using Zarr
 
             mktempdir() do tmp_dir
                 save_path = joinpath(tmp_dir, "act_model.zarr")
-                save_model(save_path, ps, st; model=model)
+                save_model(save_path, ps, st; model = model)
 
                 lazy_model = load_model(save_path)
                 @test lazy_model isa LazyLuxModel
