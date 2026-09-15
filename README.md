@@ -1,5 +1,10 @@
 # LuxZarr.jl
 
+[![][ci-img]][ci-url]
+[![][codecov-img]][codecov-url]
+[![][julia-img]][julia-url]
+[![][license-img]][license-url]
+
 Portable, chunked, and lazy [Zarr v3](https://zarr.dev/)-backed serialization for [Lux.jl](https://lux.csail.mit.edu/stable/) neural networks in Julia.
 
 ## Features
@@ -90,5 +95,17 @@ end
 ```
 
 ## License
-
+ 
 MIT License.
+
+[ci-img]: https://github.com/LuxDL/LuxZarr.jl/actions/workflows/CI.yml/badge.svg?style=round-square
+[ci-url]: https://github.com/LuxDL/LuxZarr.jl/actions/workflows/CI.yml
+
+[codecov-img]: https://codecov.io/gh/LuxDL/LuxZarr.jl/branch/main/graph/badge.svg
+[codecov-url]: https://codecov.io/gh/LuxDL/LuxZarr.jl
+
+[julia-img]: https://img.shields.io/badge/julia-v1.10+-blue.svg?style=round-square
+[julia-url]: https://julialang.org/
+
+[license-img]: https://img.shields.io/badge/license-MIT-blue.svg?style=round-square
+[license-url]: https://github.com/LuxDL/LuxZarr.jl/blob/main/LICENSE
