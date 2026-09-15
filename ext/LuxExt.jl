@@ -1,9 +1,11 @@
 module LuxExt
 
-using LuxZarr: LuxZarr, extract_model_info, reconstruct_model_from_info, load_model,
-               _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
-               LazyParameters, LazyState, LazyLuxModel, unwrap
-using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection
+using LuxZarr: LuxZarr,
+    _keypath_to_path, _deserialize_scalar, _get_zarr_node, _isleaf, _guided_load_tree,
+    LazyParameters, LazyState, LazyLuxModel, unwrap
+import LuxZarr: extract_model_info, reconstruct_model_from_info, load_model, _reconstruct_layer, _setup_model_skeleton
+using Lux: Lux, AbstractLuxLayer, Dense, Conv, Chain, Parallel, BranchLayer, BatchNorm, SkipConnection,
+    WrappedFunction, Dropout, NoOpLayer
 using LuxCore: LuxCore
 using Functors: Functors
 using Adapt: adapt
@@ -15,14 +17,19 @@ LuxZarr._get_lux_version(::Val{:Lux}) = string(pkgversion(Lux))
 LuxZarr._get_lux_version(::AbstractLuxLayer) = string(pkgversion(Lux))
 
 function LuxZarr.load_model(
-    store_or_path,
-    model::AbstractLuxLayer;
-    lazy::Bool=true,
-    rng=default_rng(),
-    kwargs...,
-)
-    ps, st = Lux.setup(rng, model)
-    ps_loaded, st_loaded = LuxZarr.load_model(store_or_path, ps, st; lazy=lazy, kwargs...)
+        store_or_path,
+        model::Union{AbstractLuxLayer, NamedTuple};
+        lazy::Bool = true,
+        rng = default_rng(),
+        kwargs...,
+    )
+    ps, st = if model isa NamedTuple
+        nt_setups = map(m -> Lux.setup(rng, m), model)
+        (map(first, nt_setups), map(last, nt_setups))
+    else
+        Lux.setup(rng, model)
+    end
+    ps_loaded, st_loaded = LuxZarr.load_model(store_or_path, ps, st; lazy = lazy, kwargs...)
     if lazy
         return LazyLuxModel(model, ps_loaded, st_loaded)
     else
@@ -31,16 +38,16 @@ function LuxZarr.load_model(
 end
 
 # Callable LazyLuxModel
-(lm::LazyLuxModel)(x, ps=lm.ps, st=lm.st) = lm.model(x, Base.materialize(ps), unwrap(st))
+(lm::LazyLuxModel)(x, ps = lm.ps, st = lm.st) = lm.model(x, Base.materialize(ps), Base.materialize(st))
 
 # Transparent application of AbstractLuxLayer with LazyParameters / LazyState
-(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
 
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st=NamedTuple()) = l(x, Base.materialize(ps), unwrap(st))
-(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), unwrap(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps::LazyParameters, st = NamedTuple()) = l(x, Base.materialize(ps), Base.materialize(st))
+(l::LuxCore.AbstractLuxWrapperLayer)(x, ps, st::LazyState) = l(x, Base.materialize(ps), Base.materialize(st))
 
 # Model metadata extraction via multiple dispatch
 function LuxZarr.extract_model_info(model::AbstractLuxLayer)
@@ -97,6 +104,48 @@ function LuxZarr.extract_model_info(model::Lux.SkipConnection)
     )
 end
 
+function LuxZarr.extract_model_info(model::Lux.WrappedFunction)
+    return Dict{String, Any}(
+        "type" => "WrappedFunction",
+        "summary" => string(model),
+        "func" => string(model.func),
+    )
+end
+
+function LuxZarr.extract_model_info(model::Lux.Dropout)
+    dims_info = if model.dims isa Colon
+        ":"
+    elseif model.dims isa Union{Tuple, AbstractVector}
+        collect(model.dims)
+    else
+        string(model.dims)
+    end
+    return Dict{String, Any}(
+        "type" => "Dropout",
+        "summary" => string(model),
+        "p" => Float64(model.p),
+        "dims" => dims_info,
+    )
+end
+
+function LuxZarr.extract_model_info(model::Lux.NoOpLayer)
+    return Dict{String, Any}(
+        "type" => "NoOpLayer",
+        "summary" => string(model),
+    )
+end
+
+function LuxZarr.extract_model_info(nns::NamedTuple)
+    d = Dict{String, Any}(
+        "__is_namedtuple__" => true,
+        "__keys__" => [string(k) for k in keys(nns)],
+    )
+    for (k, v) in pairs(nns)
+        d[string(k)] = extract_model_info(v)
+    end
+    return d
+end
+
 _get_layer_list(layers::NamedTuple) = values(layers)
 _get_layer_list(layers::Union{Tuple, AbstractVector}) = layers
 _get_layer_list(layers) = (layers,)
@@ -142,58 +191,81 @@ const _ACTIVATION_MAP = Dict{String, Function}(
 _resolve_activation(act_str::AbstractString) = get(_ACTIVATION_MAP, act_str, identity)
 
 # Layer reconstruction via dispatch
-function LuxZarr.reconstruct_model_from_info(info::AbstractDict)
-    t = Symbol(get(info, "type", ""))
-    return _reconstruct_layer(Val(t), info)
-end
-
-_reconstruct_layer(::Val, info::AbstractDict) = nothing
-
-function _reconstruct_layer(::Val{:Dense}, info::AbstractDict)
+function LuxZarr._reconstruct_layer(::Val{:Dense}, info::AbstractDict; kwargs...)
     in_dims = Int(info["in_dims"])
     out_dims = Int(info["out_dims"])
     act = _resolve_activation(string(get(info, "activation", "identity")))
     use_bias = Bool(get(info, "use_bias", true))
-    return Dense(in_dims => out_dims, act; use_bias=use_bias)
+    return Dense(in_dims => out_dims, act; use_bias = use_bias)
 end
 
-function _reconstruct_layer(::Val{:Conv}, info::AbstractDict)
+function _reconstruct_layer(::Val{:Conv}, info::AbstractDict; kwargs...)
     in_chs = Int(info["in_chs"])
     out_chs = Int(info["out_chs"])
     k_size = Tuple(Int(x) for x in info["kernel_size"])
     act = _resolve_activation(string(get(info, "activation", "identity")))
     use_bias = Bool(get(info, "use_bias", true))
-    return Conv(k_size, in_chs => out_chs, act; use_bias=use_bias)
+    return Conv(k_size, in_chs => out_chs, act; use_bias = use_bias)
 end
 
-function _reconstruct_container(f, info::AbstractDict)
+function _reconstruct_container(f, info::AbstractDict; kwargs...)
     haskey(info, "layers") || return nothing
-    sub_layers = [reconstruct_model_from_info(l) for l in info["layers"]]
+    sub_layers = [reconstruct_model_from_info(l; kwargs...) for l in info["layers"]]
     any(isnothing, sub_layers) && return nothing
     return f(sub_layers)
 end
 
-_reconstruct_layer(::Val{:Chain}, info::AbstractDict) = _reconstruct_container(layers -> Chain(layers...), info)
-_reconstruct_layer(::Val{:Parallel}, info::AbstractDict) = _reconstruct_container(layers -> Parallel(+, layers...), info)
-_reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict) = _reconstruct_container(layers -> BranchLayer(layers...), info)
+_reconstruct_layer(::Val{:Chain}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> Chain(layers...), info; kwargs...)
+_reconstruct_layer(::Val{:Parallel}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> Parallel(+, layers...), info; kwargs...)
+_reconstruct_layer(::Val{:BranchLayer}, info::AbstractDict; kwargs...) = _reconstruct_container(layers -> BranchLayer(layers...), info; kwargs...)
 
-function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict)
+function _reconstruct_layer(::Val{:BatchNorm}, info::AbstractDict; kwargs...)
     chs = Int(get(info, "chs", 1))
     return BatchNorm(chs)
 end
 
-function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict)
+function _reconstruct_layer(::Val{:WrappedFunction}, info::AbstractDict; kwargs...)
+    func_str = string(get(info, "func", "identity"))
+    fn = _resolve_activation(func_str)
+    return WrappedFunction(fn)
+end
+
+function _reconstruct_layer(::Val{:Dropout}, info::AbstractDict; kwargs...)
+    p = Float32(get(info, "p", 0.5))
+    dims_raw = get(info, "dims", ":")
+    if dims_raw == ":" || isnothing(dims_raw) || isempty(dims_raw)
+        return Dropout(p)
+    elseif dims_raw isa Union{AbstractVector, Tuple}
+        return Dropout(p; dims = Tuple(Int(d) for d in dims_raw))
+    else
+        return Dropout(p)
+    end
+end
+
+function _reconstruct_layer(::Val{:NoOpLayer}, info::AbstractDict; kwargs...)
+    return NoOpLayer()
+end
+
+function _reconstruct_layer(::Val{:SkipConnection}, info::AbstractDict; kwargs...)
     layer_info = get(info, "layers", get(info, "layer", nothing))
-    layer_info === nothing && return nothing
-    sub_l = reconstruct_model_from_info(layer_info)
-    sub_l === nothing && return nothing
+    isnothing(layer_info) && return nothing
+    sub_l = reconstruct_model_from_info(layer_info; kwargs...)
+    isnothing(sub_l) && return nothing
     return SkipConnection(sub_l, +)
 end
 
-function LuxZarr._setup_model_skeleton(model::AbstractLuxLayer, root_g, ps, st, scalar_states, lazy::Bool=true)
-    _, st_skeleton = Lux.setup(default_rng(), model)
-    st = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states, lazy)
-    return (ps, st)
+function LuxZarr._setup_model_skeleton(model::Union{AbstractLuxLayer, NamedTuple}, root_g, ps, st, scalar_states, lazy::Bool = true)
+    ps_skeleton, st_skeleton = if model isa NamedTuple
+        nt_setups = map(m -> LuxCore.setup(default_rng(), m), model)
+        (map(first, nt_setups), map(last, nt_setups))
+    else
+        LuxCore.setup(default_rng(), model)
+    end
+    attrs = Dict{String, Any}(root_g.attrs)
+    scalar_params = get(attrs, "scalar_parameters", Dict{String, Any}())
+    ps_loaded = isempty(ps) ? ps_skeleton : _guided_load_tree(root_g, ps_skeleton, "parameters", scalar_params, lazy)
+    st_loaded = isempty(st) ? st_skeleton : _guided_load_tree(root_g, st_skeleton, "states", scalar_states, lazy)
+    return (ps_loaded, st_loaded)
 end
 
 end # module

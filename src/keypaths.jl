@@ -31,7 +31,7 @@ function _deserialize_token(t::AbstractString)
         return Symbol(SubString(t, 2))
     end
     val = tryparse(Int, t)
-    return val !== nothing ? val : Symbol(t)
+    return !isnothing(val) ? val : Symbol(t)
 end
 
 """
