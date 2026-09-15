@@ -151,13 +151,9 @@ function _create_root_group(store::Zarr.ZGroup, zarr_format::Int, root_attrs::Di
     return store
 end
 function _create_root_group(store, zarr_format::Int, root_attrs::Dict{String, Any})
-    if isdefined(Zarr, :ZarrFormat)
-        try
-            return Zarr.zgroup(store, "", Zarr.ZarrFormat(zarr_format); attrs = root_attrs)
-        catch
-            return Zarr.zgroup(store, Zarr.ZarrFormat(zarr_format); attrs = root_attrs)
-        end
-    else
+    try
+        return Zarr.zgroup(store, "", zarr_format; attrs = root_attrs)
+    catch
         return Zarr.zgroup(store; attrs = root_attrs)
     end
 end

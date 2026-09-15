@@ -1,8 +1,8 @@
 module LuxZarr
 
 using Functors: Functors, KeyPath
-using LuxCore: LuxCore, AbstractLuxLayer
-using MLDataDevices: MLDataDevices, isleaf, cpu_device
+using LuxCore: LuxCore
+using MLDataDevices: MLDataDevices, cpu_device
 using Adapt: Adapt, adapt
 using Zarr: Zarr
 
