@@ -2,16 +2,12 @@
 
 Portable, chunked, and lazy [Zarr v3](https://zarr.dev/)-backed serialization for [Lux.jl](https://lux.csail.mit.edu/stable/) neural networks in Julia.
 
----
-
 ## Features
 
 - **Chunked & Compressed**: Saves parameters and state trees into standard Zarr hierarchies (Zarr v3).
 - **Lazy Loading**: Inspect and evaluate models directly from disk (`LazyLuxModel`) with minimal memory footprint, or eagerly `materialize` into standard arrays.
 - **Architecture Metadata**: Serializes layer configurations to reconstruct models standalone without requiring the original model instance.
 - **Extensible**: Simple two-method dispatch interface to support arbitrary custom layers and composite architectures.
-
----
 
 ## Installation
 
@@ -26,8 +22,6 @@ Once registered, you can install it directly with:
 using Pkg
 Pkg.add("LuxZarr")
 ```
-
----
 
 ## Quick Start
 
@@ -65,8 +59,6 @@ ps, st = load_model("my_model.zarr", ps, st; lazy = false)
 ps_cpu = materialize(lazy_model.ps)
 ```
 
----
-
 ## Extending for Custom Layers
 
 To enable metadata extraction and standalone reconstruction for your custom Lux layer, define methods for `extract_model_info` and `_reconstruct_layer`:
@@ -96,8 +88,6 @@ function LuxZarr._reconstruct_layer(::Val{:MyLinear}, info::AbstractDict; kwargs
     return MyLinear(Int(info["in_dims"]), Int(info["out_dims"]), act)
 end
 ```
-
----
 
 ## License
 
