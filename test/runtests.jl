@@ -1,4 +1,5 @@
 using LuxZarr
+import LuxZarr: materialize
 using Lux
 using LuxCore
 using Test

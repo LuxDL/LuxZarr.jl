@@ -25,6 +25,10 @@ include("load.jl")
 
 export save_model, load_model, extract_model_info, reconstruct_model_from_info,
     reconstruct_layer, resolve_activation, resolve_connection,
-    LazyParameters, LazyState, LazyLuxModel, unwrap, materialize
+    LazyParameters, LazyState, LazyLuxModel, unwrap
+
+@static if VERSION >= v"1.11"
+    eval(Expr(:public, :materialize))
+end
 
 end # module LuxZarr
