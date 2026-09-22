@@ -11,7 +11,7 @@ Portable, chunked, and lazy [Zarr v3](https://zarr.dev/)-backed serialization fo
 ## Features
 
 - **Chunked & Compressed**: Saves parameters and state trees into standard Zarr hierarchies (Zarr v3).
-- **Lazy Loading**: Inspect and evaluate models directly from disk (`LazyLuxModel`) with minimal memory footprint, or eagerly `materialize` into standard arrays.
+- **Lazy Loading**: Inspect and evaluate models directly from disk (`LazyLuxModel`) with minimal memory footprint, or eagerly `LuxZarr.materialize` into standard arrays.
 - **Architecture Metadata**: Serializes layer configurations to reconstruct models standalone without requiring the original model instance.
 - **Extensible**: Simple two-method dispatch interface to support arbitrary custom layers and composite architectures.
 
@@ -62,7 +62,7 @@ ps, st, model = load_model("my_model.zarr"; lazy = false)
 ps, st = load_model("my_model.zarr", ps, st; lazy = false)
 
 # Materialize lazy parameters to memory (or GPU device)
-ps_cpu = materialize(lazy_model.ps)
+ps_cpu = LuxZarr.materialize(lazy_model.ps)
 ```
 
 ## Extending for Custom Layers
